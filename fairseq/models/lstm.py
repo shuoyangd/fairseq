@@ -12,15 +12,15 @@ import torch.nn.functional as F
 from fairseq import options, utils
 from fairseq.modules import AdaptiveSoftmax
 from . import (
-    FairseqEncoder, FairseqIncrementalDecoder, FairseqModel, register_model,
+    FairseqEncoder, FairseqIncrementalDecoder, FairseqGenerator, FairseqModel, register_model,
     register_model_architecture,
 )
 
 
 @register_model('lstm')
 class LSTMModel(FairseqModel):
-    def __init__(self, encoder, decoder):
-        super().__init__(encoder, decoder)
+    def __init__(self, encoder, decoder, generator):
+        super().__init__(encoder, decoder, generator)
 
     @staticmethod
     def add_args(parser):
@@ -147,13 +147,29 @@ class LSTMModel(FairseqModel):
             encoder_embed_dim=args.encoder_embed_dim,
             encoder_output_units=encoder.output_units,
             pretrained_embed=pretrained_decoder_embed,
-            share_input_output_embed=args.share_decoder_input_output_embed,
+        )
+
+        if args.share_decoder_input_output_embed \
+            and pretrained_decoder_embed:
+            input_embed = pretrained_decoder_embed
+        elif args.share_decoder_input_output_embed:
+            input_embed = decoder.embed_tokens
+        else:
+            input_embed = None
+
+        generator = LSTMGenerator(
+            dictionary=task.target_dictionary,
+            embed_dim=args.decoder_embed_dim,
+            hidden_size=args.decoder_hidden_size,
+            out_embed_dim=args.decoder_out_embed_dim,
+            dropout_out=args.decoder_dropout_out,
+            input_embed=input_embed,
             adaptive_softmax_cutoff=(
                 options.eval_str_list(args.adaptive_softmax_cutoff, type=int)
                 if args.criterion == 'adaptive_loss' else None
             ),
         )
-        return cls(encoder, decoder)
+        return cls(encoder, decoder, generator)
 
 
 class LSTMEncoder(FairseqEncoder):
@@ -295,17 +311,14 @@ class LSTMDecoder(FairseqIncrementalDecoder):
     def __init__(
         self, dictionary, embed_dim=512, hidden_size=512, out_embed_dim=512,
         num_layers=1, dropout_in=0.1, dropout_out=0.1, attention=True,
-        encoder_embed_dim=512, encoder_output_units=512, pretrained_embed=None,
-        share_input_output_embed=False, adaptive_softmax_cutoff=None,
+        encoder_embed_dim=512, encoder_output_units=512, pretrained_embed=None
     ):
         super().__init__(dictionary)
         self.dropout_in = dropout_in
         self.dropout_out = dropout_out
         self.hidden_size = hidden_size
-        self.share_input_output_embed = share_input_output_embed
         self.need_attn = True
 
-        self.adaptive_softmax = None
         num_embeddings = len(dictionary)
         padding_idx = dictionary.pad()
         if pretrained_embed is None:
@@ -326,14 +339,6 @@ class LSTMDecoder(FairseqIncrementalDecoder):
             for layer in range(num_layers)
         ])
         self.attention = AttentionLayer(encoder_output_units, hidden_size) if attention else None
-        if hidden_size != out_embed_dim:
-            self.additional_fc = Linear(hidden_size, out_embed_dim)
-        if adaptive_softmax_cutoff is not None:
-            # setting adaptive_softmax dropout to dropout_out for now but can be redefined
-            self.adaptive_softmax = AdaptiveSoftmax(num_embeddings, embed_dim, adaptive_softmax_cutoff,
-                                                    dropout=dropout_out)
-        elif not self.share_input_output_embed:
-            self.fc_out = Linear(out_embed_dim, num_embeddings, dropout=dropout_out)
 
 
     def forward(self, prev_output_tokens, encoder_out_dict, incremental_state=None):
@@ -412,15 +417,6 @@ class LSTMDecoder(FairseqIncrementalDecoder):
         else:
             attn_scores = None
 
-        # project back to size of vocabulary
-        if self.adaptive_softmax is None:
-            if hasattr(self, 'additional_fc'):
-                x = self.additional_fc(x)
-                x = F.dropout(x, p=self.dropout_out, training=self.training)
-            if self.share_input_output_embed:
-                x = F.linear(x, self.embed_tokens.weight)
-            else:
-                x = self.fc_out(x)
         return x, attn_scores
 
     def reorder_incremental_state(self, incremental_state, new_order):
@@ -443,6 +439,45 @@ class LSTMDecoder(FairseqIncrementalDecoder):
 
     def make_generation_fast_(self, need_attn=False, **kwargs):
         self.need_attn = need_attn
+
+
+class LSTMGenerator(FairseqGenerator):
+
+    def __init__(
+        self, dictionary, embed_dim=512, hidden_size=512, out_embed_dim=512,
+        dropout_out=0.1, input_embed=None, adaptive_softmax_cutoff=None
+    ):
+        num_embeddings = len(dictionary)
+        super(LSTMGenerator, self).__init__(num_embeddings)
+
+        # generator weight
+        self.embed_tokens = None
+        if hidden_size != out_embed_dim:
+            if input_embed is None:
+                self.additional_fc = Linear(hidden_size, out_embed_dim)
+            else:
+                self.embed_tokens = input_embed
+
+        # adaptive softmax
+        self.adaptive_softmax = None
+        if adaptive_softmax_cutoff is not None:
+            # setting adaptive_softmax dropout to dropout_out for now but can be redefined
+            self.adaptive_softmax = AdaptiveSoftmax(num_embeddings, embed_dim, adaptive_softmax_cutoff,
+                                                    dropout=dropout_out)
+        elif not input_embed:
+            self.fc_out = Linear(out_embed_dim, num_embeddings, dropout=dropout_out)
+
+    def forward(self, net_output, log_probs, sample=None):
+        x = net_output[0]
+        if self.adaptive_softmax is None:
+            if hasattr(self, 'additional_fc'):
+                x = self.additional_fc(x)
+                x = F.dropout(x, p=self.dropout_out, training=self.training)
+            if self.embed_tokens is not None:
+                x = F.linear(x, self.embed_tokens.weight)
+            else:
+                x = self.fc_out(x)
+        return self.get_normalized_probs(x, log_probs, sample)
 
 
 def Embedding(num_embeddings, embedding_dim, padding_idx):

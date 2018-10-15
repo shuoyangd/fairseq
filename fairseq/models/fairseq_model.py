@@ -9,15 +9,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from . import FairseqDecoder, FairseqEncoder
+from . import FairseqDecoder, FairseqEncoder, FairseqGenerator
 
 
 class BaseFairseqModel(nn.Module):
     """Base class for fairseq models."""
 
-    def __init__(self):
+    def __init__(self, generator):
         super().__init__()
         self._is_generation_fast = False
+
+        self.generator = generator
+        assert isinstance(self.generator, FairseqGenerator)
 
     @staticmethod
     def add_args(parser):
@@ -36,13 +39,9 @@ class BaseFairseqModel(nn.Module):
     def get_normalized_probs(self, net_output, log_probs, sample=None):
         """Get normalized probabilities (or log probs) from a net's output."""
         if hasattr(self, 'decoder'):
-            return self.decoder.get_normalized_probs(net_output, log_probs, sample)
+            return self.generator(net_output[0], log_probs, sample)
         elif torch.is_tensor(net_output):
-            logits = net_output.float()
-            if log_probs:
-                return F.log_softmax(logits, dim=-1)
-            else:
-                return F.softmax(logits, dim=-1)
+            return self.generator(net_output, log_probs, sample)
         raise NotImplementedError
 
     def max_positions(self):
@@ -130,8 +129,8 @@ class FairseqModel(BaseFairseqModel):
         decoder (FairseqDecoder): the decoder
     """
 
-    def __init__(self, encoder, decoder):
-        super().__init__()
+    def __init__(self, encoder, decoder, generator):
+        super().__init__(generator)
 
         self.encoder = encoder
         self.decoder = decoder

@@ -11,6 +11,7 @@ import os
 
 from .fairseq_decoder import FairseqDecoder  # noqa: F401
 from .fairseq_encoder import FairseqEncoder  # noqa: F401
+from .fairseq_generator import FairseqGenerator
 from .fairseq_incremental_decoder import FairseqIncrementalDecoder  # noqa: F401
 from .fairseq_model import BaseFairseqModel, FairseqModel, FairseqLanguageModel  # noqa: F401
 

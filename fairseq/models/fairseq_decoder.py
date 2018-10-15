@@ -33,20 +33,6 @@ class FairseqDecoder(nn.Module):
         """
         raise NotImplementedError
 
-    def get_normalized_probs(self, net_output, log_probs, sample):
-        """Get normalized probabilities (or log probs) from a net's output."""
-
-        if hasattr(self, 'adaptive_softmax') and self.adaptive_softmax is not None:
-            assert sample is not None and 'target' in sample
-            out = self.adaptive_softmax.get_log_prob(net_output[0], sample['target'])
-            return out.exp_() if not log_probs else out
-
-        logits = net_output[0].float()
-        if log_probs:
-            return F.log_softmax(logits, dim=-1)
-        else:
-            return F.softmax(logits, dim=-1)
-
     def max_positions(self):
         """Maximum input length supported by the decoder."""
         return 1e6  # an arbitrary large number
