@@ -20,8 +20,8 @@ from fairseq.modules import (
 )
 
 from . import (
-    FairseqIncrementalDecoder, FairseqEncoder, FairseqLanguageModel, FairseqModel, register_model,
-    register_model_architecture,
+    FairseqIncrementalDecoder, FairseqEncoder, FairseqLanguageModel, FairseqModel, FairseqGenerator,
+    register_model, register_model_architecture,
 )
 
 
@@ -43,8 +43,8 @@ class TransformerModel(FairseqModel):
         :prog:
     """
 
-    def __init__(self, encoder, decoder):
-        super().__init__(encoder, decoder)
+    def __init__(self, encoder, decoder, generator):
+        super().__init__(encoder, decoder, generator)
 
     @staticmethod
     def add_args(parser):
@@ -142,7 +142,8 @@ class TransformerModel(FairseqModel):
 
         encoder = TransformerEncoder(args, src_dict, encoder_embed_tokens)
         decoder = TransformerDecoder(args, tgt_dict, decoder_embed_tokens)
-        return TransformerModel(encoder, decoder)
+        generator = TransformerGenerator(args, tgt_dict, decoder_embed_tokens)
+        return TransformerModel(encoder, decoder, generator)
 
 
 @register_model('transformer_lm')
@@ -358,7 +359,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
         input_embed_dim = embed_tokens.embedding_dim
         embed_dim = args.decoder_embed_dim
-        output_embed_dim = args.decoder_output_dim
 
         padding_idx = embed_tokens.padding_idx
         self.max_target_positions = args.max_target_positions
@@ -381,20 +381,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             for _ in range(args.decoder_layers)
         ])
 
-        self.adaptive_softmax = None
-
-        self.project_out_dim = Linear(embed_dim, output_embed_dim,
-                              bias=False, uniform=False) if embed_dim != output_embed_dim else None
-
-        if args.adaptive_softmax_cutoff is not None:
-            self.adaptive_softmax = AdaptiveSoftmax(
-                len(dictionary), output_embed_dim,
-                options.eval_str_list(args.adaptive_softmax_cutoff, type=int),
-                dropout=args.adaptive_softmax_dropout,
-            )
-        elif not self.share_input_output_embed:
-            self.embed_out = nn.Parameter(torch.Tensor(len(dictionary), output_embed_dim))
-            nn.init.normal_(self.embed_out, mean=0, std=output_embed_dim ** -0.5)
         self.register_buffer('version', torch.Tensor([2]))
         self.normalize = args.decoder_normalize_before and final_norm
         if self.normalize:
@@ -461,16 +447,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         # T x B x C -> B x T x C
         x = x.transpose(0, 1)
 
-        if self.project_out_dim is not None:
-            x = self.project_out_dim(x)
-
-        if self.adaptive_softmax is None:
-            # project back to size of vocabulary
-            if self.share_input_output_embed:
-                x = F.linear(x, self.embed_tokens.weight)
-            else:
-                x = F.linear(x, self.embed_out)
-
         return x, {'attn': attn, 'inner_states': inner_states}
 
     def max_positions(self):
@@ -515,6 +491,39 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
 
         return state_dict
+
+
+class TransformerGenerator(FairseqGenerator):
+
+    def __init__(self, args, dictionary, embed_tokens):
+        self.embed_tokens = embed_tokens
+        output_embed_dim = args.decoder_output_dim
+        embed_dim = args.decoder_embed_dim
+
+        self.adaptive_softmax = None
+        self.project_out_dim = Linear(embed_dim, output_embed_dim,
+                              bias=False, uniform=False) if embed_dim != output_embed_dim else None
+        if args.adaptive_softmax_cutoff is not None:
+            self.adaptive_softmax = AdaptiveSoftmax(
+                len(dictionary), output_embed_dim,
+                options.eval_str_list(args.adaptive_softmax_cutoff, type=int),
+                dropout=args.adaptive_softmax_dropout,
+            )
+        elif not self.share_input_output_embed:
+            self.embed_out = nn.Parameter(torch.Tensor(len(dictionary), output_embed_dim))
+            nn.init.normal_(self.embed_out, mean=0, std=output_embed_dim ** -0.5)
+
+    def forward(self, x, log_probs, sample=None):
+        if self.project_out_dim is not None:
+            x = self.project_out_dim(x)
+
+        if self.adaptive_softmax is None:
+            # project back to size of vocabulary
+            if self.share_input_output_embed:
+                x = F.linear(x, self.embed_tokens.weight)
+            else:
+                x = F.linear(x, self.embed_out)
+        return self.get_normalized_probs(x, log_probs, sample)
 
 
 class TransformerEncoderLayer(nn.Module):
