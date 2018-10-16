@@ -496,6 +496,10 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 class TransformerGenerator(FairseqGenerator):
 
     def __init__(self, args, dictionary, embed_tokens):
+        num_embeddings = len(dictionary)
+        super(TransformerGenerator, self).__init__(num_embeddings)
+
+        self.share_input_output_embed = args.share_decoder_input_output_embed
         self.embed_tokens = embed_tokens
         output_embed_dim = args.decoder_output_dim
         embed_dim = args.decoder_embed_dim
