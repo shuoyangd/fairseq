@@ -17,7 +17,7 @@ from fairseq.modules import (
 )
 
 from . import (
-    FairseqEncoder, FairseqIncrementalDecoder, FairseqModel,
+    FairseqEncoder, FairseqIncrementalDecoder, FairseqModel, FairseqGenerator,
     FairseqLanguageModel, register_model, register_model_architecture,
 )
 
@@ -41,8 +41,8 @@ class FConvModel(FairseqModel):
         :prog:
     """
 
-    def __init__(self, encoder, decoder):
-        super().__init__(encoder, decoder)
+    def __init__(self, encoder, decoder, generator):
+        super().__init__(encoder, decoder, generator)
         self.encoder.num_attention_layers = sum(layer is not None for layer in decoder.attention)
 
     @staticmethod
@@ -100,13 +100,23 @@ class FConvModel(FairseqModel):
             embed_dim=args.decoder_embed_dim,
             embed_dict=decoder_embed_dict,
             convolutions=eval(args.decoder_layers),
-            out_embed_dim=args.decoder_out_embed_dim,
             attention=eval(args.decoder_attention),
             dropout=args.dropout,
             max_positions=args.max_target_positions,
-            share_embed=args.share_input_output_embed,
         )
-        return FConvModel(encoder, decoder)
+        generator = FConvGenerator(
+            dictionary=task.target_dictionary,
+            out_embed_dim=args.decoder_embed_dim,
+            convolutions=eval(args.decoder_layers),
+            dropout=args.dropout,
+            share_embed=False,
+            adaptive_softmax_cutoff=(
+                options.eval_str_list(args.adaptive_softmax_cutoff, type=int)
+                if args.criterion == 'adaptive_loss' else None
+            ),
+            adaptive_softmax_dropout=args.adaptive_softmax_dropout,
+        )
+        return FConvModel(encoder, decoder, generator)
 
 
 @register_model('fconv_lm')
@@ -146,17 +156,10 @@ class FConvLanguageModel(FairseqLanguageModel):
             dictionary=task.target_dictionary,
             embed_dim=args.decoder_embed_dim,
             convolutions=eval(args.decoder_layers),
-            out_embed_dim=args.decoder_embed_dim,
             attention=eval(args.decoder_attention),
             dropout=args.dropout,
             max_positions=args.tokens_per_sample,
-            share_embed=False,
             positional_embeddings=False,
-            adaptive_softmax_cutoff=(
-                options.eval_str_list(args.adaptive_softmax_cutoff, type=int)
-                if args.criterion == 'adaptive_loss' else None
-            ),
-            adaptive_softmax_dropout=args.adaptive_softmax_dropout,
         )
         return FConvLanguageModel(decoder)
 
@@ -387,11 +390,9 @@ class FConvDecoder(FairseqIncrementalDecoder):
     """Convolutional decoder"""
 
     def __init__(
-            self, dictionary, embed_dim=512, embed_dict=None, out_embed_dim=256,
+            self, dictionary, embed_dim=512, embed_dict=None,
             max_positions=1024, convolutions=((512, 3),) * 20, attention=True,
-            dropout=0.1, share_embed=False, positional_embeddings=True,
-            adaptive_softmax_cutoff=None, adaptive_softmax_dropout=0,
-            left_pad=False,
+            dropout=0.1, positional_embeddings=True, left_pad=False,
     ):
         super().__init__(dictionary)
         self.register_buffer('version', torch.Tensor([2]))
@@ -447,21 +448,6 @@ class FConvDecoder(FairseqIncrementalDecoder):
 
         self.adaptive_softmax = None
         self.fc2 = self.fc3 = None
-
-        if adaptive_softmax_cutoff is not None:
-            assert not share_embed
-            self.adaptive_softmax = AdaptiveSoftmax(num_embeddings, in_channels, adaptive_softmax_cutoff,
-                                                    dropout=adaptive_softmax_dropout)
-        else:
-            self.fc2 = Linear(in_channels, out_embed_dim)
-            if share_embed:
-                assert out_embed_dim == embed_dim, \
-                    "Shared embed weights implies same dimensions " \
-                    " out_embed_dim={} vs embed_dim={}".format(out_embed_dim, embed_dim)
-                self.fc3 = nn.Linear(out_embed_dim, num_embeddings)
-                self.fc3.weight = self.embed_tokens.weight
-            else:
-                self.fc3 = Linear(out_embed_dim, num_embeddings, dropout=dropout)
 
     def forward(self, prev_output_tokens, encoder_out_dict=None, incremental_state=None):
         if encoder_out_dict is not None:
@@ -530,12 +516,6 @@ class FConvDecoder(FairseqIncrementalDecoder):
         # T x B x C -> B x T x C
         x = self._transpose_if_training(x, incremental_state)
 
-        # project back to size of vocabulary if not using adaptive softmax
-        if self.fc2 is not None and self.fc3 is not None:
-            x = self.fc2(x)
-            x = F.dropout(x, p=self.dropout, training=self.training)
-            x = self.fc3(x)
-
         return x, avg_attn_scores
 
     def reorder_incremental_state(self, incremental_state, new_order):
@@ -590,6 +570,52 @@ class FConvDecoder(FairseqIncrementalDecoder):
         if incremental_state is None:
             x = x.transpose(0, 1)
         return x
+
+
+class FConvGenerator(FairseqGenerator):
+
+    def __init__(
+        self, dictionary, out_embed_dim=256, convolutions=((512, 3),) * 20,
+        dropout=0.1, share_embed=False, adaptive_softmax_cutoff=None,
+        adaptive_softmax_dropout=0,
+    ):
+        """
+        TODO: adaptive softmax hasn't been used in forward in the original code,
+        probably some implemention is pending over there
+
+        :param self:
+        :param dictionary:
+        :param out_embed_dim:
+        :param convolutions:
+        :param dropout:
+        :param share_embed:
+        :param adaptive_softmax_cutoff:
+        :param adaptive_softmax_dropout:
+        :return:
+        """
+        num_embeddings = len(dictionary)
+        super(FConvGenerator, self).__init__(num_embeddings)
+
+        convolutions = extend_conv_spec(convolutions)
+        in_channels = convolutions[0][0]
+        if adaptive_softmax_cutoff is not None:
+            assert not share_embed
+            self.adaptive_softmax = AdaptiveSoftmax(num_embeddings, in_channels, adaptive_softmax_cutoff,
+                                                    dropout=adaptive_softmax_dropout)
+        else:
+            self.fc2 = Linear(in_channels, out_embed_dim)
+            if share_embed:
+                self.fc3 = nn.Linear(out_embed_dim, num_embeddings)
+                self.fc3.weight = self.embed_tokens.weight
+            else:
+                self.fc3 = Linear(out_embed_dim, num_embeddings, dropout=dropout)
+
+    def forward(self, x, log_probs, sample=None):
+        if self.fc2 is not None and self.fc3 is not None:
+            x = self.fc2(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+            x = self.fc3(x)
+        return self.get_normalized_probs(x, log_probs, sample)
 
 
 def extend_conv_spec(convolutions):
