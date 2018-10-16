@@ -467,8 +467,7 @@ class LSTMGenerator(FairseqGenerator):
         elif not input_embed:
             self.fc_out = Linear(out_embed_dim, num_embeddings, dropout=dropout_out)
 
-    def forward(self, net_output, log_probs, sample=None):
-        x = net_output[0]
+    def forward(self, x, log_probs, sample=None):
         if self.adaptive_softmax is None:
             if hasattr(self, 'additional_fc'):
                 x = self.additional_fc(x)
