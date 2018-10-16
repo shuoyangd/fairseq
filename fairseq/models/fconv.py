@@ -109,12 +109,7 @@ class FConvModel(FairseqModel):
             out_embed_dim=args.decoder_embed_dim,
             convolutions=eval(args.decoder_layers),
             dropout=args.dropout,
-            share_embed=False,
-            adaptive_softmax_cutoff=(
-                options.eval_str_list(args.adaptive_softmax_cutoff, type=int)
-                if args.criterion == 'adaptive_loss' else None
-            ),
-            adaptive_softmax_dropout=args.adaptive_softmax_dropout,
+            share_embed=args.share_input_output_embed,
         )
         return FConvModel(encoder, decoder, generator)
 
@@ -596,6 +591,7 @@ class FConvGenerator(FairseqGenerator):
         num_embeddings = len(dictionary)
         super(FConvGenerator, self).__init__(num_embeddings)
 
+        self.dropout = dropout
         convolutions = extend_conv_spec(convolutions)
         in_channels = convolutions[0][0]
         if adaptive_softmax_cutoff is not None:
