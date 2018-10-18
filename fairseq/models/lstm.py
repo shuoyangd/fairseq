@@ -12,8 +12,8 @@ import torch.nn.functional as F
 from fairseq import options, utils
 from fairseq.modules import AdaptiveSoftmax
 from . import (
-    FairseqEncoder, FairseqIncrementalDecoder, FairseqGenerator, FairseqModel, register_model,
-    register_model_architecture,
+    FairseqEncoder, FairseqIncrementalDecoder, FairseqGenerator, BasicFairseqGenerator,
+    FairseqModel, register_model, register_model_architecture,
 )
 
 
@@ -157,12 +157,24 @@ class LSTMModel(FairseqModel):
         else:
             input_embed = None
 
-        generator = LSTMGenerator(
+#        generator = LSTMGenerator(
+#            dictionary=task.target_dictionary,
+#            embed_dim=args.decoder_embed_dim,
+#            hidden_size=args.decoder_hidden_size,
+#            out_embed_dim=args.decoder_out_embed_dim,
+#            dropout_out=args.decoder_dropout_out,
+#            input_embed=input_embed,
+#            adaptive_softmax_cutoff=(
+#                options.eval_str_list(args.adaptive_softmax_cutoff, type=int)
+#                if args.criterion == 'adaptive_loss' else None
+#            ),
+#        )
+        generator = BasicFairseqGenerator(
             dictionary=task.target_dictionary,
-            embed_dim=args.decoder_embed_dim,
+            linear_builder=Linear,
             hidden_size=args.decoder_hidden_size,
             out_embed_dim=args.decoder_out_embed_dim,
-            dropout_out=args.decoder_dropout_out,
+            dropout=args.decoder_dropout_out,
             input_embed=input_embed,
             adaptive_softmax_cutoff=(
                 options.eval_str_list(args.adaptive_softmax_cutoff, type=int)
