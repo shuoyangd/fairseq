@@ -104,15 +104,7 @@ class FConvModel(FairseqModel):
             dropout=args.dropout,
             max_positions=args.max_target_positions,
         )
-        """
-        generator = FConvGenerator(
-            dictionary=task.target_dictionary,
-            out_embed_dim=args.decoder_embed_dim,
-            convolutions=eval(args.decoder_layers),
-            dropout=args.dropout,
-            share_embed=args.share_input_output_embed,
-        )
-        """
+
         convolutions = extend_conv_spec(eval(args.decoder_layers))
         in_channels = convolutions[0][0]
 
@@ -586,53 +578,6 @@ class FConvDecoder(FairseqIncrementalDecoder):
         if incremental_state is None:
             x = x.transpose(0, 1)
         return x
-
-
-class FConvGenerator(FairseqGenerator):
-
-    def __init__(
-        self, dictionary, out_embed_dim=256, convolutions=((512, 3),) * 20,
-        dropout=0.1, share_embed=False, adaptive_softmax_cutoff=None,
-        adaptive_softmax_dropout=0,
-    ):
-        """
-        TODO: adaptive softmax hasn't been used in forward in the original code,
-        probably some implemention is pending over there
-
-        :param self:
-        :param dictionary:
-        :param out_embed_dim:
-        :param convolutions:
-        :param dropout:
-        :param share_embed:
-        :param adaptive_softmax_cutoff:
-        :param adaptive_softmax_dropout:
-        :return:
-        """
-        num_embeddings = len(dictionary)
-        super(FConvGenerator, self).__init__(num_embeddings)
-
-        self.dropout = dropout
-        convolutions = extend_conv_spec(convolutions)
-        in_channels = convolutions[0][0]
-        if adaptive_softmax_cutoff is not None:
-            assert not share_embed
-            self.adaptive_softmax = AdaptiveSoftmax(num_embeddings, in_channels, adaptive_softmax_cutoff,
-                                                    dropout=adaptive_softmax_dropout)
-        else:
-            self.fc2 = Linear(in_channels, out_embed_dim)
-            if share_embed:
-                self.fc3 = nn.Linear(out_embed_dim, num_embeddings)
-                self.fc3.weight = self.embed_tokens.weight
-            else:
-                self.fc3 = Linear(out_embed_dim, num_embeddings, dropout=dropout)
-
-    def forward(self, x, log_probs, sample=None):
-        if self.fc2 is not None and self.fc3 is not None:
-            x = self.fc2(x)
-            x = F.dropout(x, p=self.dropout, training=self.training)
-            x = self.fc3(x)
-        return self.get_normalized_probs(x, log_probs, sample)
 
 
 def extend_conv_spec(convolutions):

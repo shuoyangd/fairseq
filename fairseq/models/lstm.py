@@ -157,18 +157,6 @@ class LSTMModel(FairseqModel):
         else:
             input_embed = None
 
-#        generator = LSTMGenerator(
-#            dictionary=task.target_dictionary,
-#            embed_dim=args.decoder_embed_dim,
-#            hidden_size=args.decoder_hidden_size,
-#            out_embed_dim=args.decoder_out_embed_dim,
-#            dropout_out=args.decoder_dropout_out,
-#            input_embed=input_embed,
-#            adaptive_softmax_cutoff=(
-#                options.eval_str_list(args.adaptive_softmax_cutoff, type=int)
-#                if args.criterion == 'adaptive_loss' else None
-#            ),
-#        )
         generator = BasicFairseqGenerator(
             dictionary=task.target_dictionary,
             fc_in_builder=Linear,
@@ -453,44 +441,6 @@ class LSTMDecoder(FairseqIncrementalDecoder):
 
     def make_generation_fast_(self, need_attn=False, **kwargs):
         self.need_attn = need_attn
-
-
-class LSTMGenerator(FairseqGenerator):
-
-    def __init__(
-        self, dictionary, embed_dim=512, hidden_size=512, out_embed_dim=512,
-        dropout_out=0.1, input_embed=None, adaptive_softmax_cutoff=None
-    ):
-        num_embeddings = len(dictionary)
-        super(LSTMGenerator, self).__init__(num_embeddings)
-
-        # generator weight
-        self.embed_tokens = None
-        if hidden_size != out_embed_dim:
-            if input_embed is None:
-                self.additional_fc = Linear(hidden_size, out_embed_dim)
-            else:
-                self.embed_tokens = input_embed
-
-        # adaptive softmax
-        self.adaptive_softmax = None
-        if adaptive_softmax_cutoff is not None:
-            # setting adaptive_softmax dropout to dropout_out for now but can be redefined
-            self.adaptive_softmax = AdaptiveSoftmax(num_embeddings, embed_dim, adaptive_softmax_cutoff,
-                                                    dropout=dropout_out)
-        elif not input_embed:
-            self.fc_out = Linear(out_embed_dim, num_embeddings, dropout=dropout_out)
-
-    def forward(self, x, log_probs, sample=None):
-        if self.adaptive_softmax is None:
-            if hasattr(self, 'additional_fc'):
-                x = self.additional_fc(x)
-                x = F.dropout(x, p=self.dropout_out, training=self.training)
-            if self.embed_tokens is not None:
-                x = F.linear(x, self.embed_tokens.weight)
-            else:
-                x = self.fc_out(x)
-        return self.get_normalized_probs(x, log_probs, sample)
 
 
 def Embedding(num_embeddings, embedding_dim, padding_idx):

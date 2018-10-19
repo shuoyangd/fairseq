@@ -143,7 +143,6 @@ class TransformerModel(FairseqModel):
 
         encoder = TransformerEncoder(args, src_dict, encoder_embed_tokens)
         decoder = TransformerDecoder(args, tgt_dict, decoder_embed_tokens)
-        # generator = TransformerGenerator(args, tgt_dict, decoder_embed_tokens)
 
         if args.share_decoder_input_output_embed:
             input_embed = decoder_embed_tokens
@@ -512,43 +511,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
 
         return state_dict
-
-
-class TransformerGenerator(FairseqGenerator):
-
-    def __init__(self, args, dictionary, embed_tokens):
-        num_embeddings = len(dictionary)
-        super(TransformerGenerator, self).__init__(num_embeddings)
-
-        self.share_input_output_embed = args.share_decoder_input_output_embed
-        self.embed_tokens = embed_tokens
-        output_embed_dim = args.decoder_output_dim
-        embed_dim = args.decoder_embed_dim
-
-        self.adaptive_softmax = None
-        self.project_out_dim = Linear(embed_dim, output_embed_dim,
-                              bias=False, uniform=False) if embed_dim != output_embed_dim else None
-        if args.adaptive_softmax_cutoff is not None:
-            self.adaptive_softmax = AdaptiveSoftmax(
-                len(dictionary), output_embed_dim,
-                options.eval_str_list(args.adaptive_softmax_cutoff, type=int),
-                dropout=args.adaptive_softmax_dropout,
-            )
-        elif not self.share_input_output_embed:
-            self.embed_out = nn.Parameter(torch.Tensor(len(dictionary), output_embed_dim))
-            nn.init.normal_(self.embed_out, mean=0, std=output_embed_dim ** -0.5)
-
-    def forward(self, x, log_probs, sample=None):
-        if self.project_out_dim is not None:
-            x = self.project_out_dim(x)
-
-        if self.adaptive_softmax is None:
-            # project back to size of vocabulary
-            if self.share_input_output_embed:
-                x = F.linear(x, self.embed_tokens.weight)
-            else:
-                x = F.linear(x, self.embed_out)
-        return self.get_normalized_probs(x, log_probs, sample)
 
 
 class TransformerEncoderLayer(nn.Module):
