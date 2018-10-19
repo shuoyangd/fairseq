@@ -40,8 +40,8 @@ class FairseqGenerator(nn.Module):
 
 class BasicFairseqGenerator(FairseqGenerator):
 
-    def __init__(self, dictionary, linear_builder, hidden_size, embed_dim, out_embed_dim,
-                 dropout, input_embed=None, adaptive_softmax_cutoff=None, adaptive_softmax_dropout=0):
+    def __init__(self, dictionary, fc_in_builder, fc_out_builder, hidden_size, embed_dim, out_embed_dim,
+                 dropout, input_embed=None, always_have_fc_in=False, adaptive_softmax_cutoff=None, adaptive_softmax_dropout=0):
         """
         A unified generator for lstm, fconv and transformer.
 
@@ -67,24 +67,27 @@ class BasicFairseqGenerator(FairseqGenerator):
 
         self.dropout = dropout
         self.adaptive_softmax = None
+        self.fc_in = None
         if adaptive_softmax_cutoff is not None:
             self.adaptive_softmax = AdaptiveSoftmax(num_embeddings, hidden_size, adaptive_softmax_cutoff,
                                                     dropout=dropout)
         else:
-            if hidden_size != out_embed_dim:
-                self.fc_in = linear_builder(hidden_size, out_embed_dim)
+            if hidden_size != out_embed_dim or always_have_fc_in:
+                self.fc_in = fc_in_builder(hidden_size, out_embed_dim)
 
-            self.fc_out = linear_builder(out_embed_dim, num_embeddings, dropout=dropout)
             if input_embed:
+                self.fc_out = nn.Linear(hidden_size, out_embed_dim, bias=False)
                 assert(out_embed_dim == input_embed.weight.size(0))
                 assert(num_embeddings == input_embed.weight.size(1))
                 self.fc_out.weight = input_embed.weight
+            else:
+                self.fc_out = fc_out_builder(out_embed_dim, num_embeddings, dropout=dropout)
 
     def forward(self, x, log_probs, sample=None):
         if self.adaptive_softmax is None:
             if self.fc_in is not None:
                 x = self.fc_in(x)
-                x = F.dropout(x, p=self.dropout_out, training=self.training)  # TODO: transformer doesn't seem to be using this
+                x = F.dropout(x, p=self.dropout, training=self.training)  # TODO: transformer doesn't seem to be using this
             x = self.fc_out(x)
         else:
             # TODO: adaptive softmax is not yet used here

@@ -17,7 +17,7 @@ from fairseq.modules import (
 )
 
 from . import (
-    FairseqEncoder, FairseqIncrementalDecoder, FairseqModel, FairseqGenerator,
+    FairseqEncoder, FairseqIncrementalDecoder, FairseqModel, FairseqGenerator, BasicFairseqGenerator,
     FairseqLanguageModel, register_model, register_model_architecture,
 )
 
@@ -104,12 +104,33 @@ class FConvModel(FairseqModel):
             dropout=args.dropout,
             max_positions=args.max_target_positions,
         )
+        """
         generator = FConvGenerator(
             dictionary=task.target_dictionary,
             out_embed_dim=args.decoder_embed_dim,
             convolutions=eval(args.decoder_layers),
             dropout=args.dropout,
             share_embed=args.share_input_output_embed,
+        )
+        """
+        convolutions = extend_conv_spec(eval(args.decoder_layers))
+        in_channels = convolutions[0][0]
+
+        if args.share_input_output_embed:
+            input_embed = decoder.embed_tokens
+        else:
+            input_embed = None
+
+        generator = BasicFairseqGenerator(
+            dictionary=task.target_dictionary,
+            fc_in_builder=Linear,
+            fc_out_builder=Linear,
+            out_embed_dim=args.decoder_embed_dim,
+            embed_dim=args.decoder_embed_dim,
+            hidden_size=in_channels,
+            dropout=args.dropout,
+            input_embed=input_embed,
+            always_have_fc_in=True,
         )
         return FConvModel(encoder, decoder, generator)
 

@@ -171,7 +171,9 @@ class LSTMModel(FairseqModel):
 #        )
         generator = BasicFairseqGenerator(
             dictionary=task.target_dictionary,
-            linear_builder=Linear,
+            fc_in_builder=Linear,
+            fc_out_builder=Linear,
+            embed_dim=args.decoder_embed_dim,
             hidden_size=args.decoder_hidden_size,
             out_embed_dim=args.decoder_out_embed_dim,
             dropout=args.decoder_dropout_out,

@@ -20,8 +20,9 @@ from fairseq.modules import (
 )
 
 from . import (
-    FairseqIncrementalDecoder, FairseqEncoder, FairseqLanguageModel, FairseqModel, FairseqGenerator,
-    register_model, register_model_architecture,
+    FairseqIncrementalDecoder, FairseqEncoder, FairseqLanguageModel, FairseqModel,
+    FairseqGenerator, BasicFairseqGenerator, register_model, register_model_architecture,
+
 )
 
 
@@ -142,7 +143,27 @@ class TransformerModel(FairseqModel):
 
         encoder = TransformerEncoder(args, src_dict, encoder_embed_tokens)
         decoder = TransformerDecoder(args, tgt_dict, decoder_embed_tokens)
-        generator = TransformerGenerator(args, tgt_dict, decoder_embed_tokens)
+        # generator = TransformerGenerator(args, tgt_dict, decoder_embed_tokens)
+
+        if args.share_decoder_input_output_embed:
+            input_embed = decoder_embed_tokens
+        else:
+            input_embed = None
+
+        generator = BasicFairseqGenerator(
+            dictionary=tgt_dict,
+            fc_in_builder=lambda in_dim, out_dim: \
+                Linear(in_dim, out_dim, bias=False, uniform=False),
+            fc_out_builder=Linear2,
+            hidden_size=args.decoder_embed_dim,
+            embed_dim=args.decoder_embed_dim,
+            out_embed_dim=args.decoder_output_dim,
+            dropout=0.0,
+            input_embed=input_embed,
+            always_have_fc_in=False,
+            adaptive_softmax_cutoff=args.adaptive_softmax_cutoff,
+            adaptive_softmax_dropout=args.adaptive_softmax_dropout,
+        )
         return TransformerModel(encoder, decoder, generator)
 
 
@@ -738,7 +759,7 @@ def LayerNorm(embedding_dim):
     return m
 
 
-def Linear(in_features, out_features, bias=True, uniform=True):
+def Linear(in_features, out_features, bias=True, uniform=True, dropout=0.0):
     m = nn.Linear(in_features, out_features, bias)
     if uniform:
         nn.init.xavier_uniform_(m.weight)
@@ -746,6 +767,14 @@ def Linear(in_features, out_features, bias=True, uniform=True):
         nn.init.xavier_normal_(m.weight)
     if bias:
         nn.init.constant_(m.bias, 0.)
+    return m
+
+
+def Linear2(in_features, out_features, dropout=0.0):
+    w = nn.Parameter(torch.Tensor(out_features, in_features))
+    nn.init.normal_(w, mean=0, std=in_features ** -0.5)
+    m = nn.Linear(in_features, out_features, bias=False)
+    m.weight = w
     return m
 
 
