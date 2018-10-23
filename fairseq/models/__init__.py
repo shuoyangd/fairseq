@@ -15,6 +15,7 @@ from .fairseq_generator import FairseqGenerator, BasicFairseqGenerator
 from .fairseq_incremental_decoder import FairseqIncrementalDecoder  # noqa: F401
 from .fairseq_model import BaseFairseqModel, FairseqModel, FairseqLanguageModel  # noqa: F401
 
+from .char_generator import NonAutoRegCharGenerator
 from .composite_encoder import CompositeEncoder  # noqa: F401
 from .distributed_fairseq_model import DistributedFairseqModel  # noqa: F401
 
