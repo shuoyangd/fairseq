@@ -31,4 +31,7 @@ __all__ = [
     'MultiheadAttention',
     'ScalarBias',
     'SinusoidalPositionalEmbedding',
+    'SpellingEmbedding',
+    'CNNComposer',
+    'RNNComposer',
 ]

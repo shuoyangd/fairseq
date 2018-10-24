@@ -13,11 +13,12 @@ import torch.nn.functional as F
 from fairseq import options, utils
 from fairseq.modules import (
     AdaptiveSoftmax, BeamableMM, GradMultiply, LearnedPositionalEmbedding,
-    LinearizedConvolution,
+    LinearizedConvolution, SpellingEmbedding, CNNComposer, RNNComposer,
 )
 
 from . import (
-    FairseqEncoder, FairseqIncrementalDecoder, FairseqModel, FairseqGenerator, BasicFairseqGenerator,
+    FairseqEncoder, FairseqIncrementalDecoder, FairseqModel,
+    FairseqGenerator, BasicFairseqGenerator, NonAutoRegCharGenerator,
     FairseqLanguageModel, register_model, register_model_architecture,
 )
 
@@ -103,6 +104,8 @@ class FConvModel(FairseqModel):
             attention=eval(args.decoder_attention),
             dropout=args.dropout,
             max_positions=args.max_target_positions,
+            spelling_embed=args.spelling_embedding,
+            char_embed_dim=args.char_embed_dim,
         )
 
         convolutions = extend_conv_spec(eval(args.decoder_layers))
@@ -113,17 +116,30 @@ class FConvModel(FairseqModel):
         else:
             input_embed = None
 
-        generator = BasicFairseqGenerator(
-            dictionary=task.target_dictionary,
-            fc_in_builder=Linear,
-            fc_out_builder=Linear,
-            out_embed_dim=args.decoder_embed_dim,
-            embed_dim=args.decoder_embed_dim,
-            hidden_size=in_channels,
-            dropout=args.dropout,
-            input_embed=input_embed,
-            always_have_fc_in=True,
-        )
+        if args.non_autoreg_char:
+            generator = BasicFairseqGenerator(
+                dictionary=task.target_dictionary,
+                fc_in_builder=Linear,
+                fc_out_builder=Linear,
+                out_embed_dim=args.decoder_embed_dim,
+                embed_dim=args.decoder_embed_dim,
+                hidden_size=in_channels,
+                dropout=args.dropout,
+                input_embed=input_embed,
+                always_have_fc_in=True,
+            )
+        else:
+            generator = NonAutoRegCharGenerator(
+                char_dictionary=task.target_dictionary,
+                fc_in_builder=Linear,
+                fc_out_builder=Linear,
+                hidden_size=in_channels,
+                char_embed_dim=args.decoder_embed_dim,
+                pos_embed_dim=args.char_pos_embed_dim,
+                dropout=args.dropout,
+                max_word_len=args.max_word_len,
+                denoisier_layers=args.num_denoisier_layers,
+            )
         return FConvModel(encoder, decoder, generator)
 
 
@@ -401,6 +417,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
             self, dictionary, embed_dim=512, embed_dict=None,
             max_positions=1024, convolutions=((512, 3),) * 20, attention=True,
             dropout=0.1, positional_embeddings=True, left_pad=False,
+            spelling_embed=False, char_embed_dim=128,
     ):
         super().__init__(dictionary)
         self.register_buffer('version', torch.Tensor([2]))
@@ -419,7 +436,12 @@ class FConvDecoder(FairseqIncrementalDecoder):
 
         num_embeddings = len(dictionary)
         padding_idx = dictionary.pad()
-        self.embed_tokens = Embedding(num_embeddings, embed_dim, padding_idx)
+        if spelling_embed and not embed_dict:
+            # TODO: we don't load a pre-trained character embedding for the moment, maybe soon
+            embed_composer = CNNComposer(char_embed_dim, embed_dim)  # TODO: hard-code to CNN for the moment
+            self.embed_tokens = SpellingEmbedding(num_embeddings, embed_composer)
+        else:
+            self.embed_tokens = Embedding(num_embeddings, embed_dim, padding_idx)
         if embed_dict:
             self.embed_tokens = utils.load_embedding(embed_dict, self.dictionary, self.embed_tokens)
 
@@ -472,6 +494,8 @@ class FConvDecoder(FairseqIncrementalDecoder):
 
         if incremental_state is not None:
             prev_output_tokens = prev_output_tokens[:, -1:]
+        # prev_output_tokens supposed to be size (seq_len, batch_size)
+        # not sure what happens after adding characters
         x = self._embed_tokens(prev_output_tokens, incremental_state)
 
         # embed tokens and combine with positional embeddings

@@ -17,9 +17,7 @@ import shutil
 
 
 from fairseq.data import indexed_dataset, dictionary
-from fairseq.tokenizer import Tokenizer, tokenize_line
 from multiprocessing import Pool, Manager, Process
-
 
 
 def get_parser():
@@ -46,6 +44,8 @@ def get_parser():
     parser.add_argument('--padding-factor', metavar='N', default=8, type=int,
                         help='Pad dictionary size to be multiple of N')
     parser.add_argument('--workers', metavar='N', default=1, type=int, help='number of parallel workers')
+    parser.add_argument('--char-level', metavar="CHAR", default=False, type=bool,
+                        help='whether character-level preprocessing should be performed')
     return parser
 
 
@@ -53,6 +53,12 @@ def main(args):
     print(args)
     os.makedirs(args.destdir, exist_ok=True)
     target = not args.only_source
+    if args.char_level:
+        from fairseq.tokenizer import CharTokenizer as Tokenizer
+        from fairseq.tokenizer import tokenize_line_char as tokenize_line
+    else:
+        from fairseq.tokenizer import Tokenizer
+        from fairseq.tokenizer import tokenize_line
 
     def build_dictionary(filenames):
         d = dictionary.Dictionary()
@@ -227,6 +233,11 @@ def main(args):
 
 
 def binarize(args, filename, dict, output_prefix, lang, offset, end):
+
+    if args.char_level:
+        from fairseq.tokenizer import CharTokenizer as Tokenizer
+    else:
+        from fairseq.tokenizer import Tokenizer
 
     ds = indexed_dataset.IndexedDatasetBuilder(dataset_dest_file(args, output_prefix, lang, 'bin'))
     def consumer(tensor):

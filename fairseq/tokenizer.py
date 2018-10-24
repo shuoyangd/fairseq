@@ -19,6 +19,10 @@ def tokenize_line(line):
     line = line.strip()
     return line.split()
 
+def tokenize_line_char(line):
+    line = SPACE_NORMALIZER.sub(" ", line)
+    line = line.strip()
+    return [ list(s) for s in line.split() ]
 
 def safe_readline(f):
     pos = f.tell()
@@ -134,4 +138,52 @@ class Tokenizer:
             ids[i] = idx
         if append_eos:
             ids[nwords] = dict.eos_index
+        return ids
+
+
+class CharTokenizer(Tokenizer):
+
+    @staticmethod
+    def add_file_to_dictionary_single_worker(filename, tokenize, eos_word, worker_id=0, num_workers=1):
+        counter = Counter()
+        with open(filename, 'r') as f:
+            size = os.fstat(f.fileno()).st_size
+            chunk_size = size // num_workers
+            offset = worker_id * chunk_size
+            end = offset + chunk_size
+            f.seek(offset)
+            if offset > 0:
+                safe_readline(f) # drop first incomplete line
+            line = f.readline()
+            while line:
+                for word in tokenize(line):
+                    for char in tokenize(line):
+                        counter.update([char])
+                counter.update([eos_word])
+                if f.tell() > end:
+                    break
+                line = f.readline()
+        return counter
+
+    @staticmethod
+    def tokenize(line, dict, tokenize=tokenize_line_char, add_if_not_exist=True,
+                 consumer=None, append_eos=True, reverse_order=False):
+        chars = tokenize(line)
+        if reverse_order:
+            chars = list(reversed(chars))
+        nwords = len(chars)
+        max_word_len = max(map(lambda x: len(x), chars))
+        ids = torch.IntTensor(nwords + 1 if append_eos else nwords, max_word_len)
+
+        for i, word in enumerate(chars):
+            for j, char in enumerate(word):
+                if add_if_not_exist:
+                    idx = dict.add_symbol(char)
+                else:
+                    idx = dict.index(char)
+                if consumer is not None:
+                    consumer(word, idx)
+                ids[i, j] = idx
+        if append_eos:
+            ids[nwords, 0] = dict.eos_index
         return ids

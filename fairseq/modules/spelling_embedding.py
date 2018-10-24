@@ -91,6 +91,16 @@ class CNNComposer(SpellingComposer):
         return ret
 
 
+class RNNComposer(SpellingComposer):
+
+    def __init__(self, char_emb_size, word_emb_size):
+        super().__init__(char_emb_size, word_emb_size)
+        raise NotImplementedError
+
+    def forward(self, word_emb):
+        raise NotImplementedError
+
+
 class SpellingEmbedding(nn.Embedding):
 
     def __init__(self, num_embeddings, composer,
