@@ -44,8 +44,8 @@ def get_parser():
     parser.add_argument('--padding-factor', metavar='N', default=8, type=int,
                         help='Pad dictionary size to be multiple of N')
     parser.add_argument('--workers', metavar='N', default=1, type=int, help='number of parallel workers')
-    parser.add_argument('--char-level', metavar="CHAR", default=False, type=bool,
-                        help='whether character-level preprocessing should be performed')
+    parser.add_argument('--char-level', action='store_true', help='whether character-level preprocessing should be performed')
+
     return parser
 
 

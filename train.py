@@ -12,6 +12,7 @@ Train a new model on one or across multiple GPUs.
 import collections
 import itertools
 import os
+import pdb
 import math
 import torch
 
@@ -61,6 +62,7 @@ def main(args):
     ))
 
     # Initialize dataloader
+    pdb.set_trace()
     epoch_itr = task.get_batch_iterator(
         dataset=task.dataset(args.train_subset),
         max_tokens=args.max_tokens,

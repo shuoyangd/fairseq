@@ -17,6 +17,7 @@ from .linearized_convolution import LinearizedConvolution
 from .multihead_attention import MultiheadAttention
 from .scalar_bias import ScalarBias
 from .sinusoidal_positional_embedding import SinusoidalPositionalEmbedding
+from .spelling_embedding import SpellingEmbedding, CNNComposer, RNNComposer
 
 __all__ = [
     'AdaptiveSoftmax',
