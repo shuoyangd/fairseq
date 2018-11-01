@@ -74,7 +74,7 @@ class FConvModel(FairseqModel):
                                  ' to be equal)')
         parser.add_argument('--spelling-embedding', default=False, action='store_true',
                             help='enables a embedding that\'s built from spelling')
-        parser.add_argument('--char-embed-dim', type=int, metavar='N',
+        parser.add_argument('--char-embed-dim', type=int, metavar='N', default=128,
                             help='dimension of the character embedding')
         parser.add_argument('--char-pos-embed-dim', type=int, metavar='N',
                             help='dimension of the positional embedding for ' +
