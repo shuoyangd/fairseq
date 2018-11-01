@@ -195,9 +195,13 @@ class Dictionary(object):
         for symbol, count in zip(self.symbols[self.nspecial:], self.count[self.nspecial:]):
             print('{} {}'.format(symbol, count), file=f)
 
-    def dummy_sentence(self, length):
-        t = torch.Tensor(length).uniform_(self.nspecial + 1, len(self)).long()
-        t[-1] = self.eos()
+    def dummy_sentence(self, length, char_level=False, char_length=20):
+        if char_level:
+            t = torch.Tensor(length, char_length).uniform_(self.nspecial + 1, len(self)).long()
+            t[-1, 0] = self.eos()
+        else:
+            t = torch.Tensor(length).uniform_(self.nspecial + 1, len(self)).long()
+            t[-1] = self.eos()
         return t
 
 class TruncatedDictionary(object):

@@ -64,12 +64,12 @@ class CNNComposer(SpellingComposer):
     def forward(self, word_emb):
         """
 
-        :param word_emb: expecting size of (batch_size, ..., sent_len, word_len, emb_size)
+        :param word_emb: expecting size of (batch_size, ..., word_len, emb_size)
         :return:
         """
 
-        word_emb = word_emb.transpose(-1, -2)  # (batch, ..., seq_len, char_emb_size)
-        size = word_emb.size()  # (batch, ..., char_emb_size, seq_len)
+        word_emb = word_emb.transpose(-1, -2)  # (batch, ..., char_emb_size, word_len)
+        size = word_emb.size()
         word_emb_squeeze = word_emb.view(-1, self.char_emb_size, size[-1])  # squeeze the irrelevant axes
 
         tmp = [_cnn(word_emb_squeeze) for _cnn in self.cnns]
@@ -126,7 +126,7 @@ class SpellingEmbedding(nn.Embedding):
         """
         retrieve the embedding as usual, then apply composition function over the spelling
 
-        :param input: expected to be (batch, ..., sent_len, word_len)
+        :param input: expected to be (batch, ..., word_len)
         :return:
         """
         ret = F.embedding(

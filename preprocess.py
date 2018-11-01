@@ -17,6 +17,9 @@ import shutil
 
 
 from fairseq.data import indexed_dataset, dictionary
+from fairseq.tokenizer import (
+    Tokenizer, tokenize_line, CharTokenizer, tokenize_line_char
+)
 from multiprocessing import Pool, Manager, Process
 
 
@@ -53,17 +56,17 @@ def main(args):
     print(args)
     os.makedirs(args.destdir, exist_ok=True)
     target = not args.only_source
-    if args.char_level:
-        from fairseq.tokenizer import CharTokenizer as Tokenizer
-        from fairseq.tokenizer import tokenize_line_char as tokenize_line
-    else:
-        from fairseq.tokenizer import Tokenizer
-        from fairseq.tokenizer import tokenize_line
 
     def build_dictionary(filenames):
         d = dictionary.Dictionary()
         for filename in filenames:
             Tokenizer.add_file_to_dictionary(filename, d, tokenize_line, args.workers)
+        return d
+
+    def build_dictionary_char(filenames):
+        d = dictionary.Dictionary()
+        for filename in filenames:
+            CharTokenizer.add_file_to_dictionary(filename, d, tokenize_line_char, args.workers)
         return d
 
     def train_path(lang):
@@ -98,6 +101,9 @@ def main(args):
         if target:
             if args.tgtdict:
                 tgt_dict = dictionary.Dictionary.load(args.tgtdict)
+            elif args.char_level:
+                assert args.trainpref, "--trainpref must be set if --tgtdict is not specified"
+                tgt_dict = build_dictionary_char([train_path(args.target_lang)])
             else:
                 assert args.trainpref, "--trainpref must be set if --tgtdict is not specified"
                 tgt_dict = build_dictionary([train_path(args.target_lang)])
@@ -117,7 +123,7 @@ def main(args):
             )
         tgt_dict.save(dict_path(args.target_lang))
 
-    def make_binary_dataset(input_prefix, output_prefix, lang, num_workers):
+    def make_binary_dataset(input_prefix, output_prefix, lang, num_workers, char_level=False):
         dict = dictionary.Dictionary.load(dict_path(lang))
         print('| [{}] Dictionary: {} types'.format(lang, len(dict) - 1))
         n_seq_tok = [0, 0]
@@ -129,7 +135,10 @@ def main(args):
             n_seq_tok[1] += worker_result['ntok']
 
         input_file = '{}{}'.format(input_prefix, ('.' + lang) if lang is not None else '')
-        offsets = Tokenizer.find_offsets(input_file, num_workers)
+        if char_level:
+            offsets = CharTokenizer.find_offsets(input_file, num_workers)
+        else:
+            offsets = Tokenizer.find_offsets(input_file, num_workers)
         pool = None
         if num_workers > 1:
             pool = Pool(processes=num_workers-1)
@@ -141,8 +150,12 @@ def main(args):
             pool.close()
 
         ds = indexed_dataset.IndexedDatasetBuilder(dataset_dest_file(args, output_prefix, lang, 'bin'))
-        merge_result(Tokenizer.binarize(input_file, dict, lambda t: ds.add_item(t),
-                                        offset=0, end=offsets[1]))
+        if char_level:
+            merge_result(CharTokenizer.binarize(input_file, dict, lambda t: ds.add_item(t),
+                                            offset=0, end=offsets[1]))
+        else:
+            merge_result(Tokenizer.binarize(input_file, dict, lambda t: ds.add_item(t),
+                                            offset=0, end=offsets[1]))
         if num_workers > 1:
             pool.join()
             for worker_id in range(1, num_workers):
@@ -162,9 +175,9 @@ def main(args):
 
 
 
-    def make_dataset(input_prefix, output_prefix, lang, num_workers=1):
+    def make_dataset(input_prefix, output_prefix, lang, num_workers=1, char_level=False):
         if args.output_format == 'binary':
-            make_binary_dataset(input_prefix, output_prefix, lang, num_workers)
+            make_binary_dataset(input_prefix, output_prefix, lang, num_workers, char_level=char_level)
         elif args.output_format == 'raw':
             # Copy original text file to destination folder
             output_text_file = dest_path(
@@ -173,21 +186,21 @@ def main(args):
             )
             shutil.copyfile(file_name(input_prefix, lang), output_text_file)
 
-    def make_all(lang):
+    def make_all(lang, char_level=False):
         if args.trainpref:
-            make_dataset(args.trainpref, 'train', lang, num_workers=args.workers)
+            make_dataset(args.trainpref, 'train', lang, num_workers=args.workers, char_level=char_level)
         if args.validpref:
             for k, validpref in enumerate(args.validpref.split(',')):
                 outprefix = 'valid{}'.format(k) if k > 0 else 'valid'
-                make_dataset(validpref, outprefix, lang)
+                make_dataset(validpref, outprefix, lang, char_level=char_level)
         if args.testpref:
             for k, testpref in enumerate(args.testpref.split(',')):
                 outprefix = 'test{}'.format(k) if k > 0 else 'test'
-                make_dataset(testpref, outprefix, lang)
+                make_dataset(testpref, outprefix, lang, char_level=char_level)
 
     make_all(args.source_lang)
     if target:
-        make_all(args.target_lang)
+        make_all(args.target_lang, char_level=args.char_level)
 
     print('| Wrote preprocessed data to {}'.format(args.destdir))
 
@@ -234,16 +247,14 @@ def main(args):
 
 def binarize(args, filename, dict, output_prefix, lang, offset, end):
 
-    if args.char_level:
-        from fairseq.tokenizer import CharTokenizer as Tokenizer
-    else:
-        from fairseq.tokenizer import Tokenizer
-
     ds = indexed_dataset.IndexedDatasetBuilder(dataset_dest_file(args, output_prefix, lang, 'bin'))
     def consumer(tensor):
         ds.add_item(tensor)
 
-    res = Tokenizer.binarize(filename, dict, consumer, offset=offset, end=end)
+    if args.char_level:
+        res = CharTokenizer.binarize(filename, dict, consumer, offset=offset, end=end)
+    else:
+        res = Tokenizer.binarize(filename, dict, consumer, offset=offset, end=end)
     ds.finalize(dataset_dest_file(args, output_prefix, lang, 'idx'))
     return res
 

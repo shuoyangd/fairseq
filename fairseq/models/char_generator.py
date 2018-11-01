@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import pdb
+
 from . import FairseqGenerator
 from fairseq.modules import LearnedPositionalEmbedding
 
@@ -89,7 +91,7 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         max_seq_len = x.size(0)
         batch_size = x.size(1)
         x = x.unsqueeze(1).expand(-1, self.max_word_len, -1, -1)  # (max_seq_len, max_word_len, batch_size, hidden_dim)
-        pos_idx = torch.arange(self.max_word_len).long()
+        pos_idx = torch.arange(self.max_word_len).type_as(x).long()
         pos_idx = pos_idx.unsqueeze(0).expand(max_seq_len, -1)
         pos_idx = pos_idx.unsqueeze(2).expand(-1, -1, batch_size)  # (max_seq_len, max_word_len, batch_size)
         pos = self.pos_embed(pos_idx)  # (max_seq_len, max_word_len, batch_size, pos_embed_dim)

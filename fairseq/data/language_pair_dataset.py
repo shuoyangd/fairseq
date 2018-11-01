@@ -7,6 +7,7 @@
 
 import numpy as np
 import torch
+import pdb
 
 from fairseq import utils
 
@@ -21,10 +22,16 @@ def collate(
         return {}
 
     def merge(key, left_pad, move_eos_to_beginning=False):
-        return data_utils.collate_tokens(
-            [s[key] for s in samples],
-            pad_idx, eos_idx, left_pad, move_eos_to_beginning,
-        )
+        if len(samples[0][key].size()) == 1:
+            return data_utils.collate_tokens(
+                [s[key] for s in samples],
+                pad_idx, eos_idx, left_pad, move_eos_to_beginning,
+            )
+        else:
+            return data_utils.collate_char_seqs(
+                [s[key] for s in samples],
+                pad_idx, eos_idx, left_pad, move_eos_to_beginning,
+            )
 
     id = torch.LongTensor([s['id'] for s in samples])
     src_tokens = merge('source', left_pad=left_pad_source)
@@ -163,7 +170,7 @@ class LanguagePairDataset(FairseqDataset):
             input_feeding=self.input_feeding,
         )
 
-    def get_dummy_batch(self, num_tokens, max_positions, src_len=128, tgt_len=128):
+    def get_dummy_batch(self, num_tokens, max_positions, src_len=128, tgt_len=128, tgt_char_level=False):
         """Return a dummy batch with a given number of tokens."""
         src_len, tgt_len = utils.resolve_max_positions(
             (src_len, tgt_len),
@@ -175,7 +182,8 @@ class LanguagePairDataset(FairseqDataset):
             {
                 'id': i,
                 'source': self.src_dict.dummy_sentence(src_len),
-                'target': self.tgt_dict.dummy_sentence(tgt_len) if self.tgt_dict is not None else None,
+                'target': self.tgt_dict.dummy_sentence(tgt_len, tgt_char_level) \
+                              if self.tgt_dict is not None else None,
             }
             for i in range(bsz)
         ])

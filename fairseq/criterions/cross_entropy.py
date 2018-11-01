@@ -5,12 +5,15 @@
 # the root directory of this source tree. An additional grant of patent rights
 # can be found in the PATENTS file in the same directory.
 
+import pdb
 import math
+import torch
 import torch.nn.functional as F
 
 from fairseq import utils
 
 from . import FairseqCriterion, register_criterion
+from fairseq.models import NonAutoRegCharGenerator
 
 
 @register_criterion('cross_entropy')
@@ -29,8 +32,21 @@ class CrossEntropyCriterion(FairseqCriterion):
         """
         net_output = model(**sample['net_input'])
         lprobs = model.get_normalized_probs(net_output, log_probs=True)
-        lprobs = lprobs.view(-1, lprobs.size(-1))
-        target = model.get_targets(sample, net_output).view(-1)
+        target = model.get_targets(sample, net_output)
+        if len(target.size()) == 3:
+            assert hasattr(model, "generator") and \
+                isinstance(model.generator, NonAutoRegCharGenerator)
+            max_word_len = model.generator.max_word_len
+            if target.size(2) < max_word_len:
+                pad = torch.ones_like(lprobs[:, :max_word_len - target.size(2), :, 0].transpose(1, 2)).long()  # lprobs only provides the shape
+                target = torch.cat([target, pad], dim=2)
+            elif target.size(2) > max_word_len:
+                target = target[:, :, :max_word_len]
+        lprobs = lprobs.contiguous().view(-1, lprobs.size(-1))
+        target = target.contiguous().view(-1)
+        if lprobs.size(0) != target.size(0):
+            pdb.set_trace()
+        assert lprobs.size(0) == target.size(0)
         loss = F.nll_loss(lprobs, target, size_average=False, ignore_index=self.padding_idx,
                           reduce=reduce)
         sample_size = sample['target'].size(0) if self.args.sentence_avg else sample['ntokens']

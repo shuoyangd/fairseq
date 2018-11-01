@@ -7,6 +7,7 @@
 
 import contextlib
 import os
+import pdb
 
 import numpy as np
 
@@ -39,6 +40,27 @@ def collate_tokens(values, pad_idx, eos_idx, left_pad, move_eos_to_beginning=Fal
         copy_tensor(v, res[i][size - len(v):] if left_pad else res[i][:len(v)])
     return res
 
+def collate_char_seqs(values, pad_idx, eos_idx, left_pad, move_eos_to_beginning=False):
+    """Convert a list of 2d tensors into a padded 3d tensor."""
+    seq_len = max(v.size(0) for v in values)
+    char_len = max(v.size(1) for v in values)
+    res = values[0].new(len(values), seq_len, char_len).fill_(pad_idx)
+
+    def copy_tensor(src, dst):
+        # assert dst.numel() == src.numel()
+        if dst.numel() != src.numel():
+            pdb.set_trace()
+        if move_eos_to_beginning:
+            assert src[-1][0] == eos_idx
+            dst[0] = eos_idx
+            dst[1:] = src[:-1]
+        else:
+            dst.copy_(src)
+
+    for i, v in enumerate(values):
+        copy_tensor(v, res[i][seq_len - len(v):, char_len - len(v[0]):] if left_pad \
+            else res[i][:len(v), :len(v[0])])
+    return res
 
 @contextlib.contextmanager
 def numpy_seed(seed):

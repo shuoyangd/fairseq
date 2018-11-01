@@ -5,6 +5,7 @@
 # the root directory of this source tree. An additional grant of patent rights
 # can be found in the PATENTS file in the same directory.
 
+import pdb
 import math
 import torch
 import torch.nn as nn
@@ -71,6 +72,20 @@ class FConvModel(FairseqModel):
                             help='share input and output embeddings (requires'
                                  ' --decoder-out-embed-dim and --decoder-embed-dim'
                                  ' to be equal)')
+        parser.add_argument('--spelling-embedding', default=False, action='store_true',
+                            help='enables a embedding that\'s built from spelling')
+        parser.add_argument('--char-embed-dim', type=int, metavar='N',
+                            help='dimension of the character embedding')
+        parser.add_argument('--char-pos-embed-dim', type=int, metavar='N',
+                            help='dimension of the positional embedding for ' +
+                                 'non-autoregressive (NA) spelling generation')
+        parser.add_argument('--max-word-len', type=int, default=25, metavar='N',
+                            help='the maximum number of characters a word can have in a NA spelling generator')
+        parser.add_argument('--num-denoisier-layers', type=int, default=2, metavar='N',
+                            help='number of denoisier layers the NA spelling generator should have')
+        parser.add_argument('--non-autoreg-char', default=False, action='store_true',
+                            help='')
+
 
     @classmethod
     def build_model(cls, args, task):
@@ -116,7 +131,7 @@ class FConvModel(FairseqModel):
         else:
             input_embed = None
 
-        if args.non_autoreg_char:
+        if not args.non_autoreg_char:
             generator = BasicFairseqGenerator(
                 dictionary=task.target_dictionary,
                 fc_in_builder=Linear,
@@ -134,7 +149,7 @@ class FConvModel(FairseqModel):
                 fc_in_builder=Linear,
                 fc_out_builder=Linear,
                 hidden_size=in_channels,
-                char_embed_dim=args.decoder_embed_dim,
+                char_embed_dim=args.char_embed_dim,
                 pos_embed_dim=args.char_pos_embed_dim,
                 dropout=args.dropout,
                 max_word_len=args.max_word_len,
@@ -416,7 +431,8 @@ class FConvDecoder(FairseqIncrementalDecoder):
     def __init__(
             self, dictionary, embed_dim=512, embed_dict=None,
             max_positions=1024, convolutions=((512, 3),) * 20, attention=True,
-            dropout=0.1, positional_embeddings=True, left_pad=False,
+            # dropout=0.1, positional_embeddings=True, left_pad=False,
+            dropout=0.1, positional_embeddings=False, left_pad=False,
             spelling_embed=False, char_embed_dim=128,
     ):
         super().__init__(dictionary)

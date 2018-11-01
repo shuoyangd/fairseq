@@ -186,7 +186,7 @@ class CharTokenizer:
             merge_result(CharTokenizer.add_file_to_dictionary_single_worker(filename, tokenize, dict.eos_word))
 
     @staticmethod
-    def binarize(filename, dict, consumer, tokenize=tokenize_line,
+    def binarize(filename, dict, consumer, tokenize=tokenize_line_char,
                             append_eos=True, reverse_order=False,
                             offset=0, end=-1):
         nseq, ntok = 0, 0
@@ -237,6 +237,7 @@ class CharTokenizer:
         nwords = len(chars)
         max_word_len = max(map(lambda x: len(x), chars))
         ids = torch.IntTensor(nwords + 1 if append_eos else nwords, max_word_len)
+        ids.fill_(dict.pad_index)
 
         for i, word in enumerate(chars):
             for j, char in enumerate(word):
@@ -245,7 +246,7 @@ class CharTokenizer:
                 else:
                     idx = dict.index(char)
                 if consumer is not None:
-                    consumer(word, idx)
+                    consumer(char, idx)
                 ids[i, j] = idx
         if append_eos:
             ids[nwords, 0] = dict.eos_index
