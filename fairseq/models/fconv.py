@@ -5,7 +5,6 @@
 # the root directory of this source tree. An additional grant of patent rights
 # can be found in the PATENTS file in the same directory.
 
-import pdb
 import math
 import torch
 import torch.nn as nn
@@ -198,7 +197,7 @@ class FConvLanguageModel(FairseqLanguageModel):
             attention=eval(args.decoder_attention),
             dropout=args.dropout,
             max_positions=args.tokens_per_sample,
-            positional_embeddings=False,
+            positional_embeddings=True,
         )
         return FConvLanguageModel(decoder)
 
@@ -431,8 +430,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
     def __init__(
             self, dictionary, embed_dim=512, embed_dict=None,
             max_positions=1024, convolutions=((512, 3),) * 20, attention=True,
-            # dropout=0.1, positional_embeddings=True, left_pad=False,
-            dropout=0.1, positional_embeddings=False, left_pad=False,
+            dropout=0.1, positional_embeddings=True, left_pad=False,
             spelling_embed=False, char_embed_dim=128,
     ):
         super().__init__(dictionary)
@@ -504,7 +502,9 @@ class FConvDecoder(FairseqIncrementalDecoder):
             encoder_a, encoder_b = self._split_encoder_out(encoder_out, incremental_state)
 
         if self.embed_positions is not None:
-            pos_embed = self.embed_positions(prev_output_tokens, incremental_state)
+            pos_embed = self.embed_positions(prev_output_tokens, incremental_state) \
+                if not isinstance(self.embed_tokens, SpellingEmbedding) \
+                else self.embed_positions(prev_output_tokens[:, :, 0], incremental_state)
         else:
             pos_embed = 0
 
