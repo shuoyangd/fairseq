@@ -38,8 +38,11 @@ class BaseFairseqModel(nn.Module):
 
     def get_normalized_probs(self, net_output, log_probs, sample=None):
         """Get normalized probabilities (or log probs) from a net's output."""
-        if hasattr(self, 'decoder'):
+        if hasattr(self, 'decoder') and len(net_output[0].size()) == 3:
             return self.generator(net_output[0], log_probs, sample)
+        elif hasattr(self, 'decoder') and len(net_output[0].size()) == 2:  # (batch_size, hid_dim), used for decoding
+            net_output = net_output[0].unsqueeze(0)
+            return self.generator(net_output, log_probs, sample)
         elif torch.is_tensor(net_output):
             return self.generator(net_output, log_probs, sample)
         raise NotImplementedError

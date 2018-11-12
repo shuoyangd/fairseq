@@ -10,10 +10,12 @@ Translate pre-processed data with a trained model.
 """
 
 import torch
+import pdb
 
 from fairseq import bleu, data, options, progress_bar, tasks, tokenizer, utils
+from fairseq.models import NonAutoRegCharGenerator
 from fairseq.meters import StopwatchMeter, TimeMeter
-from fairseq.sequence_generator import SequenceGenerator
+from fairseq.sequence_generator import SequenceGenerator, NonAutoRegCharSequenceGenerator
 from fairseq.sequence_scorer import SequenceScorer
 
 
@@ -75,6 +77,14 @@ def main(args):
     gen_timer = StopwatchMeter()
     if args.score_reference:
         translator = SequenceScorer(models, task.target_dictionary)
+    elif isinstance(models[0].generator, NonAutoRegCharGenerator):
+        translator = NonAutoRegCharSequenceGenerator(
+            models, task.target_dictionary, beam_size=args.beam, minlen=args.min_len,
+            stop_early=(not args.no_early_stop), normalize_scores=(not args.unnormalized),
+            len_penalty=args.lenpen, unk_penalty=args.unkpen,
+            sampling=args.sampling, sampling_topk=args.sampling_topk, sampling_temperature=args.sampling_temperature,
+            diverse_beam_groups=args.diverse_beam_groups, diverse_beam_strength=args.diverse_beam_strength,
+        )
     else:
         translator = SequenceGenerator(
             models, task.target_dictionary, beam_size=args.beam, minlen=args.min_len,

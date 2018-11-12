@@ -64,7 +64,7 @@ def main(args):
         return d
 
     def build_dictionary_char(filenames):
-        d = dictionary.Dictionary()
+        d = dictionary.CharDictionary()
         for filename in filenames:
             CharTokenizer.add_file_to_dictionary(filename, d, tokenize_line_char, args.workers)
         return d

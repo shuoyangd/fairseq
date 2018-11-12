@@ -5,7 +5,6 @@
 # the root directory of this source tree. An additional grant of patent rights
 # can be found in the PATENTS file in the same directory.
 
-import pdb
 import math
 import torch
 import torch.nn.functional as F
@@ -44,8 +43,6 @@ class CrossEntropyCriterion(FairseqCriterion):
                 target = target[:, :, :max_word_len]
         lprobs = lprobs.contiguous().view(-1, lprobs.size(-1))
         target = target.contiguous().view(-1)
-        if lprobs.size(0) != target.size(0):
-            pdb.set_trace()
         assert lprobs.size(0) == target.size(0)
         loss = F.nll_loss(lprobs, target, size_average=False, ignore_index=self.padding_idx,
                           reduce=reduce)

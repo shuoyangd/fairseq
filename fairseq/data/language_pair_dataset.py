@@ -182,7 +182,7 @@ class LanguagePairDataset(FairseqDataset):
             {
                 'id': i,
                 'source': self.src_dict.dummy_sentence(src_len),
-                'target': self.tgt_dict.dummy_sentence(tgt_len, tgt_char_level) \
+                'target': self.tgt_dict.dummy_sentence(tgt_len) \
                               if self.tgt_dict is not None else None,
             }
             for i in range(bsz)
