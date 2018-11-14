@@ -24,7 +24,7 @@ class SpellingComposer(nn.Module):
         self.char_emb_size = char_emb_size
         self.word_emb_size = word_emb_size
 
-    def forward(self, word_emb):
+    def forward(self, char_emb):
         raise NotImplementedError
 
 
@@ -61,16 +61,16 @@ class CNNComposer(SpellingComposer):
         self.cnn_mix = cnn_mix
         self.kernals = kernals
 
-    def forward(self, word_emb):
+    def forward(self, char_emb):
         """
 
-        :param word_emb: expecting size of (batch_size, ..., word_len, emb_size)
+        :param char_emb: expecting size of (batch_size, ..., word_len, emb_size)
         :return:
         """
 
-        word_emb = word_emb.transpose(-1, -2)  # (batch, ..., char_emb_size, word_len)
-        size = word_emb.size()
-        word_emb_squeeze = word_emb.view(-1, self.char_emb_size, size[-1])  # squeeze the irrelevant axes
+        char_emb = char_emb.transpose(-1, -2)  # (batch, ..., char_emb_size, word_len)
+        size = char_emb.size()
+        word_emb_squeeze = char_emb.view(-1, self.char_emb_size, size[-1])  # squeeze the irrelevant axes
 
         tmp = [_cnn(word_emb_squeeze) for _cnn in self.cnns]
         if self.cnn_mix == 'cat':
@@ -87,18 +87,42 @@ class CNNComposer(SpellingComposer):
         new_size = tuple(new_size)
         ret = ret.view(new_size)  # (batch, ..., word_emb_size)
 
-        del word_emb, tmp
+        del char_emb, tmp
         return ret
 
 
 class RNNComposer(SpellingComposer):
 
-    def __init__(self, char_emb_size, word_emb_size):
+    def __init__(self, char_emb_size, word_emb_size, layers=1):
         super().__init__(char_emb_size, word_emb_size)
-        raise NotImplementedError
+        self.rnn = torch.nn.RNN(char_emb_size, word_emb_size,
+                                num_layers=layers,
+                                bidirectional=True,
+                                batch_first=True)
+        self.h0 = torch.nn.Parameter(torch.zeros(word_emb_size))
 
-    def forward(self, word_emb, length=None):
-        raise NotImplementedError
+    def forward(self, char_emb, lengths=None):
+        """
+
+        :param char_emb: (batch_size, ..., word_len, word_emb_dim)
+        :param lengths:
+        :return: (batch, ..., word_emb_dim)
+        """
+
+        input_size = char_emb.size()
+        word_emb_dim = len(self.h0)
+        char_emb = char_emb.transpose(1, -2)  # (batch_size, word_len, ..., word_emb_dim)
+        if lengths is None:
+            _, hn = self.rnn(char_emb, self.h0)
+        else:
+            packed = torch.nn.utils.rnn.pack_padded_sequence(char_emb, lengths, batch_first=True)
+            _, hn = self.rnn(packed, self.h0)
+        hn = hn.transpose(0, 1)  # (batch_size * ..., num_layers * num_dir, hidden_size)
+        hn = hn.view(-1, word_emb_dim)
+        ret_size = list(input_size)[0:-2]
+        ret_size.append(word_emb_dim)  # (batch_size, ..., word_emb_dim)
+        hn = hn.view(*tuple(ret_size))
+        return hn
 
 
 class SpellingEmbedding(nn.Embedding):
