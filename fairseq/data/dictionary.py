@@ -152,8 +152,8 @@ class Dictionary(object):
         """Helper to get index of unk symbol"""
         return self.unk_index
 
-    @classmethod
-    def load(cls, f, ignore_utf_errors=False):
+    @staticmethod
+    def load(f, ignore_utf_errors=False):
         """Loads the dictionary from a text file with the format:
 
         ```
@@ -166,17 +166,23 @@ class Dictionary(object):
             try:
                 if not ignore_utf_errors:
                     with open(f, 'r', encoding='utf-8') as fd:
-                        return cls.load(fd)
+                        return Dictionary.load(fd)
                 else:
                     with open(f, 'r', encoding='utf-8', errors='ignore') as fd:
-                        return cls.load(fd)
+                        return Dictionary.load(fd)
             except FileNotFoundError as fnfe:
                 raise fnfe
             except Exception:
                 raise Exception("Incorrect encoding detected in {}, please "
                                 "rebuild the dataset".format(f))
 
-        d = cls()
+        first_line = f.readline().strip()
+        if first_line == "char_level":
+            d = CharDictionary()
+        else:
+            d = Dictionary()
+            f.seek(0)
+
         for line in f.readlines():
             idx = line.rfind(' ')
             word = line[:idx]
@@ -204,12 +210,22 @@ class CharDictionary(Dictionary):
 
     def __init__(self, pad='<pad>', eos='</s>', eow='</w>', unk='<unk>'):
         super().__init__(pad, eos, unk)
-        self.add_symbol(eow)
+        self.eow_index = self.add_symbol(eow)
 
     def dummy_sentence(self, length, char_length=20):
         t = torch.Tensor(length, char_length).uniform_(self.nspecial + 1, len(self)).long()
         t[-1, 0] = self.eos()
         return t
+
+    def save(self, f):
+        """Stores dictionary into a text file"""
+        if isinstance(f, str):
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            with open(f, 'w', encoding='utf-8') as fd:
+                return self.save(fd)
+        print(u'char_level', file=f)
+        for symbol, count in zip(self.symbols[self.nspecial:], self.count[self.nspecial:]):
+            print('{} {}'.format(symbol, count), file=f)
 
 class TruncatedDictionary(object):
 

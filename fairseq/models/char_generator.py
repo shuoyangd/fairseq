@@ -16,7 +16,8 @@ class Denoisier(nn.Module):
         self.fc_out = nn.Linear(bn_features, out_features)
 
     def forward(self, x):
-        return self.fc_out(self.fc_in(x))
+        bottleneck = torch.nn.functional.relu(self.fc_in(x))
+        return torch.nn.functional.relu(self.fc_out(bottleneck))
 
 
 class NonAutoRegCharGenerator(FairseqGenerator):
@@ -65,12 +66,12 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         # self.pos_embed = PositionalEmbedding(max_word_len, pos_embed_dim, char_dictionary.pad(), left_pad)
 
         # also, what the fairseq positional embedding does is not quite a good fit for what we are doing
-        self.pos_embed = nn.Embedding(num_embeddings, pos_embed_dim)
+        self.pos_embed = nn.Embedding(self.max_word_len, pos_embed_dim)
 
         denoisiers = []
         for _ in range(denoisier_layers):
             denoisiers.append(Denoisier(char_embed_dim + pos_embed_dim,
-                                        char_embed_dim + pos_embed_dim // denoisier_bottleneck_factor,
+                                        (char_embed_dim + pos_embed_dim) // denoisier_bottleneck_factor,
                                         char_embed_dim + pos_embed_dim))
         if denoisiers:
             self.denoisier = nn.Sequential(*tuple(denoisiers))
@@ -80,27 +81,26 @@ class NonAutoRegCharGenerator(FairseqGenerator):
     def forward(self, x, log_probs, sample=None):
         """
 
-        :param x: of size (max_seq_len, batch_size, hidden_dim)
+        :param x: of size (batch_size, max_seq_len, hidden_dim)
         :param log_probs: boolean indicating whether to output log prob or real prob
         :param sample: when scoring a sample, the sample should be passed here
         :return:
         """
         if self.fc_in is not None:
-            x = self.fc_in(x)
+            x = torch.nn.functional.relu(self.fc_in(x))
             x = F.dropout(x, p=self.dropout, training=self.training)  # TODO: transformer doesn't seem to be using this
-        max_seq_len = x.size(0)
-        batch_size = x.size(1)
-        x = x.unsqueeze(1).expand(-1, self.max_word_len, -1, -1)  # (max_seq_len, max_word_len, batch_size, hidden_dim)
+        batch_size = x.size(0)
+        max_seq_len = x.size(1)
+        x = x.unsqueeze(2).expand(-1, -1, self.max_word_len, -1)  # (batch_size, max_seq_len, max_word_len, hidden_dim)
         pos_idx = torch.arange(self.max_word_len).type_as(x).long()
-        pos_idx = pos_idx.unsqueeze(0).expand(max_seq_len, -1)
-        pos_idx = pos_idx.unsqueeze(2).expand(-1, -1, batch_size)  # (max_seq_len, max_word_len, batch_size)
-        pos = self.pos_embed(pos_idx)  # (max_seq_len, max_word_len, batch_size, pos_embed_dim)
-        x = torch.cat((x, pos), dim=3)  # (max_seq_len, max_word_len, batch_size, hidden_dim + pos_embed_dim)
+        pos_idx = pos_idx.unsqueeze(0).expand(batch_size, max_seq_len, -1)  # (batch_size, max_seq_len, max_word_len)
+        pos = self.pos_embed(pos_idx)  # (batch_size, max_seq_len, max_word_len, pos_embed_dim)
+        x = torch.cat((x, pos), dim=3)  # (batch_size, max_seq_len, max_word_len, hidden_dim + pos_embed_dim)
 
         if self.denoisier:
             x = self.denoisier(x)
 
-        x = self.fc_out(x)  # (max_seq_len, max_word_len, batch_size, num_embeddings)
+        x = self.fc_out(x)  # (batch_size, max_seq_len, max_word_len, num_embeddings)
         return self.get_normalized_probs(x, log_probs, sample)
 
 

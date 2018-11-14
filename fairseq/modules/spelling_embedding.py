@@ -97,7 +97,7 @@ class RNNComposer(SpellingComposer):
         super().__init__(char_emb_size, word_emb_size)
         raise NotImplementedError
 
-    def forward(self, word_emb):
+    def forward(self, word_emb, length=None):
         raise NotImplementedError
 
 

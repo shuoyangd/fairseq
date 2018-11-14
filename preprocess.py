@@ -15,7 +15,6 @@ from itertools import zip_longest
 import os
 import shutil
 
-
 from fairseq.data import indexed_dataset, dictionary
 from fairseq.tokenizer import (
     Tokenizer, tokenize_line, CharTokenizer, tokenize_line_char
@@ -125,6 +124,7 @@ def main(args):
 
     def make_binary_dataset(input_prefix, output_prefix, lang, num_workers, char_level=False):
         dict = dictionary.Dictionary.load(dict_path(lang))
+        assert (not char_level) or (char_level and isinstance(dict, dictionary.CharDictionary))
         print('| [{}] Dictionary: {} types'.format(lang, len(dict) - 1))
         n_seq_tok = [0, 0]
         replaced = Counter()

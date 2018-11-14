@@ -8,6 +8,7 @@
 import math
 import torch
 import torch.nn.functional as F
+import pdb
 
 from fairseq import utils
 
@@ -37,10 +38,20 @@ class CrossEntropyCriterion(FairseqCriterion):
                 isinstance(model.generator, NonAutoRegCharGenerator)
             max_word_len = model.generator.max_word_len
             if target.size(2) < max_word_len:
-                pad = torch.ones_like(lprobs[:, :max_word_len - target.size(2), :, 0].transpose(1, 2)).long()  # lprobs only provides the shape
+                pad = torch.ones_like(lprobs[:, :, :max_word_len - target.size(2), 0]).long()  # lprobs only provides the shape
                 target = torch.cat([target, pad], dim=2)
             elif target.size(2) > max_word_len:
                 target = target[:, :, :max_word_len]
+
+        # FIXME: sample
+        """
+        lprobs_pred = lprobs.clone()
+        lprobs_pred[:, :, :, self.padding_idx] = -99
+        _, idxes = torch.max(lprobs_pred, dim=-1)
+        print("pred: " + self.tgt_dict.string(idxes[0, 0:5]))
+        print("tgt: " + self.tgt_dict.string(target[0, 0:5]))
+        """
+
         lprobs = lprobs.contiguous().view(-1, lprobs.size(-1))
         target = target.contiguous().view(-1)
         assert lprobs.size(0) == target.size(0)

@@ -230,7 +230,7 @@ class CharTokenizer:
 
     @staticmethod
     def tokenize(line, dict, tokenize=tokenize_line_char, add_if_not_exist=True,
-                 consumer=None, append_eos=True, append_word_eos=True, reverse_order=False):
+                 consumer=None, append_eos=True, append_eow=True, reverse_order=False):
         chars = tokenize(line)
         if reverse_order:
             chars = list(reversed(chars))
@@ -239,7 +239,10 @@ class CharTokenizer:
         if max_word_len == 0:  # empty sentence, should not proceed further
             return torch.IntTensor([])
 
-        ids = torch.IntTensor(nwords + 1 if append_eos else nwords, max_word_len)
+        ids = torch.IntTensor(\
+                nwords + 1 if append_eos else nwords, \
+                max_word_len + 1 if append_eow else max_word_len \
+              )
         ids.fill_(dict.pad_index)
 
         for i, word in enumerate(chars):
@@ -252,7 +255,7 @@ class CharTokenizer:
                 if consumer is not None:
                     consumer(char, idx)
                 ids[i, j] = idx
-            if append_word_eos:
+            if append_eow:
                 ids[i, nchars] = dict.eow_index
         if append_eos:
             ids[nwords, 0] = dict.eos_index
