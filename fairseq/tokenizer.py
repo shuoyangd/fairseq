@@ -22,7 +22,37 @@ def tokenize_line(line):
 def tokenize_line_char(line):
     line = SPACE_NORMALIZER.sub(" ", line)
     line = line.strip()
-    return [ list(s) for s in line.split() ]
+    line = line.strip()
+    char_list = [ merge_reserve(list(s)) for s in line.split() ]
+    return char_list
+
+def merge_reserve(char_list):
+  ret = []
+  reserve_buf = ""
+  reserving_and = False
+  reserving_at = False
+  for idx, char in enumerate(char_list):
+    if char == '&' and not reserving_and:
+      reserve_buf += char
+      reserving_and = True
+    elif char == '@' and not reserving_at:
+      reserve_buf += char
+      reserving_at = True
+    elif char == ';' and reserving_and:
+      reserve_buf += char
+      reserving_and = False
+      ret.append(reserve_buf)
+      reserve_buf = ""
+    elif char == '@' and reserving_at:
+      reserve_buf += char
+      reserving_at = False
+      ret.append(reserve_buf)
+      reserve_buf = ""
+    elif reserve_buf:
+      reserve_buf += char
+    else:
+      ret.append(char)
+  return ret
 
 def safe_readline(f):
     pos = f.tell()

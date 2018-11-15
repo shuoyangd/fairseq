@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,10 +11,11 @@ from fairseq.modules import LearnedPositionalEmbedding
 
 class Denoisier(nn.Module):
 
-    def __init__(self, in_features, bn_features, out_features):
+    def __init__(self, in_features, bn_features, out_features,
+                 fc_in_builder=nn.Linear, fc_out_builder=nn.Linear):
         super().__init__()
-        self.fc_in = nn.Linear(in_features, bn_features)
-        self.fc_out = nn.Linear(bn_features, out_features)
+        self.fc_in = fc_in_builder(in_features, bn_features)
+        self.fc_out = fc_out_builder(bn_features, out_features)
 
     def forward(self, x):
         bottleneck = torch.nn.functional.relu(self.fc_in(x))
@@ -72,7 +74,9 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         for _ in range(denoisier_layers):
             denoisiers.append(Denoisier(char_embed_dim + pos_embed_dim,
                                         (char_embed_dim + pos_embed_dim) // denoisier_bottleneck_factor,
-                                        char_embed_dim + pos_embed_dim))
+                                        char_embed_dim + pos_embed_dim,
+                                        fc_in_builder,
+                                        fc_out_builder))
         if denoisiers:
             self.denoisier = nn.Sequential(*tuple(denoisiers))
         else:
@@ -110,3 +114,4 @@ def PositionalEmbedding(num_embeddings, embedding_dim, padding_idx, left_pad):
     nn.init.normal_(m.weight, 0, 0.1)
     nn.init.constant_(m.weight[padding_idx], 0)
     return m
+

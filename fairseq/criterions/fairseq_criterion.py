@@ -15,6 +15,7 @@ class FairseqCriterion(_Loss):
         self.args = args
         self.padding_idx = task.target_dictionary.pad()
         self.tgt_dict = task.dataset("train").tgt_dict  # FIXME: sample
+        self.task = task
 
     @staticmethod
     def add_args(parser):

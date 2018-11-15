@@ -9,7 +9,6 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pdb
 
 from fairseq import options, utils
 from fairseq.modules import (
@@ -454,7 +453,8 @@ class FConvDecoder(FairseqIncrementalDecoder):
         if spelling_embed and not embed_dict:
             # TODO: we don't load a pre-trained character embedding for the moment, maybe soon
             embed_composer = CNNComposer(char_embed_dim, embed_dim)  # TODO: hard-code to CNN for the moment
-            self.embed_tokens = SpellingEmbedding(num_embeddings, embed_composer)
+            # embed_composer = RNNComposer(char_embed_dim, embed_dim)  # TODO: hard-code to RNN for the moment
+            self.embed_tokens = SpellingEmbedding(num_embeddings, embed_composer, padding_idx)
         else:
             self.embed_tokens = Embedding(num_embeddings, embed_dim, padding_idx)
         if embed_dict:

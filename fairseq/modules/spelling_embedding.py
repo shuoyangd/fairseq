@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from torch.nn import functional as F
-
+from .highway import Highway
 
 # A lower-level max pooling compared to PyTorch
 # which essentially take max over some dimension
@@ -60,15 +60,17 @@ class CNNComposer(SpellingComposer):
         self.cnns = cnns
         self.cnn_mix = cnn_mix
         self.kernals = kernals
+        # self.highway = Highway(word_emb_size, 4)
+        # self.highway.reset_parameters()
 
     def forward(self, char_emb):
         """
 
-        :param char_emb: expecting size of (batch_size, ..., word_len, emb_size)
+        :param char_emb: expecting size of (seq_len, batch_size, ..., word_len, emb_size)
         :return:
         """
 
-        char_emb = char_emb.transpose(-1, -2)  # (batch, ..., char_emb_size, word_len)
+        char_emb = char_emb.transpose(-1, -2)  # (seq_len, batch_size, ..., char_emb_size, word_len)
         size = char_emb.size()
         word_emb_squeeze = char_emb.view(-1, self.char_emb_size, size[-1])  # squeeze the irrelevant axes
 
@@ -87,41 +89,49 @@ class CNNComposer(SpellingComposer):
         new_size = tuple(new_size)
         ret = ret.view(new_size)  # (batch, ..., word_emb_size)
 
+        ret = torch.nn.functional.relu(ret)
+        # ret = self.highway(ret)
+
         del char_emb, tmp
         return ret
 
 
 class RNNComposer(SpellingComposer):
 
-    def __init__(self, char_emb_size, word_emb_size, layers=1):
+    def __init__(self, char_emb_size, word_emb_size, layers=2):
         super().__init__(char_emb_size, word_emb_size)
-        self.rnn = torch.nn.RNN(char_emb_size, word_emb_size,
+        self.rnn = torch.nn.RNN(char_emb_size, word_emb_size // (layers * 2),
                                 num_layers=layers,
                                 bidirectional=True,
                                 batch_first=True)
-        self.h0 = torch.nn.Parameter(torch.zeros(word_emb_size))
+        self.h0 = torch.nn.Parameter(torch.zeros(word_emb_size // (layers * 2)))
 
     def forward(self, char_emb, lengths=None):
         """
 
-        :param char_emb: (batch_size, ..., word_len, word_emb_dim)
+        :param char_emb: (seq_len, batch_size, ..., word_len, word_emb_dim)
         :param lengths:
         :return: (batch, ..., word_emb_dim)
         """
 
         input_size = char_emb.size()
-        word_emb_dim = len(self.h0)
-        char_emb = char_emb.transpose(1, -2)  # (batch_size, word_len, ..., word_emb_dim)
+        word_len = input_size[-2]
+        char_emb_dim = input_size[-1]
+        word_emb_dim = len(self.h0) * (self.rnn.num_layers * 2)
+        char_emb = char_emb.contiguous().view(-1, word_len, char_emb_dim)  # (seq_len * batch_size ..., word_len, word_emb_dim)
+        eq_batch_size = char_emb.size(0)
+        h0 = self.h0.unsqueeze(0).unsqueeze(1).expand(self.rnn.num_layers * 2, eq_batch_size, -1).contiguous()
         if lengths is None:
-            _, hn = self.rnn(char_emb, self.h0)
+            _, hn = self.rnn(char_emb, h0)
         else:
             packed = torch.nn.utils.rnn.pack_padded_sequence(char_emb, lengths, batch_first=True)
-            _, hn = self.rnn(packed, self.h0)
-        hn = hn.transpose(0, 1)  # (batch_size * ..., num_layers * num_dir, hidden_size)
-        hn = hn.view(-1, word_emb_dim)
+            _, hn = self.rnn(packed, h0)
+        hn = hn.transpose(0, 1)  # (seq_len * batch_size * ..., num_layers * num_dir, hidden_size)
+        hn = hn.contiguous().view(-1, word_emb_dim)
         ret_size = list(input_size)[0:-2]
-        ret_size.append(word_emb_dim)  # (batch_size, ..., word_emb_dim)
+        ret_size.append(word_emb_dim)  # (seq_len, batch_size, ..., word_emb_dim)
         hn = hn.view(*tuple(ret_size))
+
         return hn
 
 
@@ -143,6 +153,9 @@ class SpellingEmbedding(nn.Embedding):
         """
         super().__init__(num_embeddings, composer.char_emb_size, padding_idx,
                         max_norm, norm_type, scale_grad_by_freq, sparse, _weight)
+        nn.init.normal_(self.weight, 0, 0.1)
+        if padding_idx is not None:
+            nn.init.constant_(self.weight[padding_idx], 0)
         self.composer = composer
 
 

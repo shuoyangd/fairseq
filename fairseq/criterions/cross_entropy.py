@@ -6,6 +6,7 @@
 # can be found in the PATENTS file in the same directory.
 
 import math
+import sys
 import torch
 import torch.nn.functional as F
 import pdb
@@ -48,8 +49,8 @@ class CrossEntropyCriterion(FairseqCriterion):
         lprobs_pred = lprobs.clone()
         lprobs_pred[:, :, :, self.padding_idx] = -99
         _, idxes = torch.max(lprobs_pred, dim=-1)
-        print("pred: " + self.tgt_dict.string(idxes[0, 0:5]))
-        print("tgt: " + self.tgt_dict.string(target[0, 0:5]))
+        sys.stdout.buffer.write(("pred: " + self.tgt_dict.string(idxes[0, 0]) + "\n").encode('utf-8'))
+        sys.stdout.buffer.write(("tgt: " + self.tgt_dict.string(target[0, 0]) + "\n").encode('utf-8'))
         """
 
         lprobs = lprobs.contiguous().view(-1, lprobs.size(-1))
