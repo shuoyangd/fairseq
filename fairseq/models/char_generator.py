@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import pdb
+
 from . import FairseqGenerator
 from fairseq.modules import LearnedPositionalEmbedding, MultiheadAttention
 
@@ -33,13 +35,13 @@ class RefinementLayer(nn.Module):
         self.pos_embed = pos_embed
         self.char_embed_dim = char_embed.embedding_dim
         self.pos_embed_dim = pos_embed.embedding_dim
+        self.dropout = dropout
         self.num_embeddings = len(char_dictionary)
-
         self.fc_in = RefinementLinear(hidden_size, self.char_embed_dim + self.pos_embed_dim, bias=False, dropout=dropout)
-        self.fc_in_rev = RefinementLayer(self.char_embed_dim + self.pos_embed_dim, hidden_size, bias=False, dropout=dropout)
-        self.fc_in_rev = self.fc_in.weight.weight.transpose(0, 1)  # tie weights
+        self.fc_in_rev = RefinementLinear(self.char_embed_dim + self.pos_embed_dim, hidden_size, bias=False, dropout=dropout)
+        self.fc_in_rev.weight = self.fc_in.weight.transpose(0, 1)  # tie weights
 
-        self.attn = MultiheadAttention(self.char_embed_dim, num_attn_heads)
+        self.attn = MultiheadAttention(self.char_embed_dim + self.pos_embed_dim, num_attn_heads)
 
         bottlenecks = []
         for _ in range(bottleneck_layers):
@@ -62,9 +64,10 @@ class RefinementLayer(nn.Module):
 
         batch_size, max_seq_len, max_word_len, _ = logits.size()
         logits = logits.view(-1, self.num_embeddings)
-        char_idx = F.gumbel_softmax(logits).view(batch_size, max_seq_len, max_word_len)
+        char_one_hot = F.gumbel_softmax(logits).view(batch_size, max_seq_len, max_word_len, self.num_embeddings)
 
-        char_embeds = self.char_embed(char_idx)  # (batch_size, max_seq_len, max_word_len, char_embed_dim)
+        # char_embeds = self.char_embed(char_idx)  # (batch_size, max_seq_len, max_word_len, char_embed_dim)
+        char_embeds = char_one_hot.matmul(self.char_embed.weight)  # FIXME: make sure we are not using fancier embedding retrieval
         pos_idx = torch.arange(max_word_len).type_as(logits).long()
         pos_idx = pos_idx.unsqueeze(0).expand(batch_size, max_seq_len, -1)  # (batch_size, max_seq_len, max_word_len)
         pos_embeds = self.pos_embed(pos_idx)  # (batch_size, max_seq_len, max_word_len, pos_embed_dim)
@@ -75,18 +78,21 @@ class RefinementLayer(nn.Module):
         kv_embeds = torch.cat((char_embeds, pos_embeds), dim=-1)
         q_embeds = self.fc_in(decoder_embed)
         q_embeds = F.dropout(q_embeds, p=self.dropout, training=self.training)
-        attn_embeds = self.attn(q_embeds, kv_embeds, kv_embeds)
-        attn_embeds = attn_embeds.view(batch_size, max_seq_len, self.char_embed_dim + self.pos_embed_dim)
-        attn_embeds = self.fc_in_rev(attn_embeds)  # (batch_size, max_seq_len, hidden_size)
+        q_embeds = q_embeds.view(batch_size * max_seq_len, -1)
+        q_embeds = q_embeds.unsqueeze(0)  # (1, batch_size * max_seq_len, attn_embed_dim)
+        attn_embeds, _ = self.attn(q_embeds, kv_embeds, kv_embeds)
+        attn_embeds.squeeze_()
+        attn_embeds = self.fc_in_rev(attn_embeds)  # (batch_size * max_seq_len, hidden_size)
         attn_embeds = F.dropout(attn_embeds, p=self.dropout, training=self.training)
 
         # (batch_size, max_seq_len, max_word_len hidden_size)
-        attn_embeds = attn_embeds.unsqueeze(2).expand(-1, -1, max_word_len, -1)
+        attn_embeds = attn_embeds.unsqueeze(1).expand(-1, max_word_len, -1)
         bn_in = torch.cat(
-            (attn_embeds, pos_embeds.view(batch_size * max_seq_len, max_word_len, self.pos_embed_dim)), dim=-1)
+            (attn_embeds, pos_embeds.transpose_(0, 1)),
+            dim=-1)
 
         bn_out = self.bottleneck(bn_in)
-        ret_logit = self.fc_out(bn_out)  # (batch_size, max_seq_len, max_word_len, num_embeddings)
+        ret_logit = self.fc_out(bn_out).view(batch_size, max_seq_len, max_word_len, -1)  # (batch_size, max_seq_len, max_word_len, num_embeddings)
         return ret_logit
 
 
@@ -175,7 +181,7 @@ class NonAutoRegCharGenerator(FairseqGenerator):
                                               bottleneck_layers, bottleneck_factor))
 
             if refinements:
-                self.refinement = nn.Sequential(*tuple(refinements))
+                self.refinement = nn.ModuleList(refinements)
             else:
                 self.refinement = None
 
@@ -188,6 +194,7 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         :param sample: when scoring a sample, the sample should be passed here
         :return:
         """
+        decoder_embed = x.clone()
         if self.fc_in is not None:
             x = torch.nn.functional.relu(self.fc_in(x))
             x = F.dropout(x, p=self.dropout, training=self.training)  # TODO: transformer doesn't seem to be using this
@@ -207,9 +214,10 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         if self.refinement:
             if self.tie_refinements:
                 for _ in range(self.refinement_layers):
-                    x = self.refinement(x)
+                    x = self.refinement(x, decoder_embed)
             else:
-                x = self.refinement(x)
+                for ref in self.refinement:
+                    x = ref(x, decoder_embed)
 
         return self.get_normalized_probs(x, log_probs, sample)
 
