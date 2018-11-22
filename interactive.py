@@ -16,7 +16,8 @@ import sys
 import torch
 
 from fairseq import data, options, tasks, tokenizer, utils
-from fairseq.sequence_generator import SequenceGenerator
+from fairseq.sequence_generator import SequenceGenerator, NonAutoRegCharSequenceGenerator
+from fairseq.models import NonAutoRegCharGenerator
 
 
 Batch = namedtuple('Batch', 'srcs tokens lengths')
@@ -35,7 +36,7 @@ def buffered_read(buffer_size):
         yield buffer
 
 
-def make_batches(lines, args, task, max_positions):
+def make_batches(lines, args, task, max_positions, char_level=False):
     tokens = [
         tokenizer.Tokenizer.tokenize(src_str, task.source_dictionary, add_if_not_exist=False).long()
         for src_str in lines
@@ -91,13 +92,23 @@ def main(args):
             model.half()
 
     # Initialize generator
-    translator = SequenceGenerator(
-        models, tgt_dict, beam_size=args.beam, minlen=args.min_len,
-        stop_early=(not args.no_early_stop), normalize_scores=(not args.unnormalized),
-        len_penalty=args.lenpen, unk_penalty=args.unkpen,
-        sampling=args.sampling, sampling_topk=args.sampling_topk, sampling_temperature=args.sampling_temperature,
-        diverse_beam_groups=args.diverse_beam_groups, diverse_beam_strength=args.diverse_beam_strength,
-    )
+    char_level = args.char_level
+    if char_level:
+        translator = NonAutoRegCharSequenceGenerator(
+            models, task.target_dictionary, beam_size=args.beam, minlen=args.min_len,
+            stop_early=(not args.no_early_stop), normalize_scores=(not args.unnormalized),
+            len_penalty=args.lenpen, unk_penalty=args.unkpen,
+            sampling=args.sampling, sampling_topk=args.sampling_topk, sampling_temperature=args.sampling_temperature,
+            diverse_beam_groups=args.diverse_beam_groups, diverse_beam_strength=args.diverse_beam_strength,
+        )
+    else:
+        translator = SequenceGenerator(
+            models, tgt_dict, beam_size=args.beam, minlen=args.min_len,
+            stop_early=(not args.no_early_stop), normalize_scores=(not args.unnormalized),
+            len_penalty=args.lenpen, unk_penalty=args.unkpen,
+            sampling=args.sampling, sampling_topk=args.sampling_topk, sampling_temperature=args.sampling_temperature,
+            diverse_beam_groups=args.diverse_beam_groups, diverse_beam_strength=args.diverse_beam_strength,
+        )
 
     if use_cuda:
         translator.cuda()
@@ -116,14 +127,25 @@ def main(args):
 
         # Process top predictions
         for hypo in hypos[:min(len(hypos), args.nbest)]:
-            hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
-                hypo_tokens=hypo['tokens'].int().cpu(),
-                src_str=src_str,
-                alignment=hypo['alignment'].int().cpu() if hypo['alignment'] is not None else None,
-                align_dict=align_dict,
-                tgt_dict=tgt_dict,
-                remove_bpe=args.remove_bpe,
-            )
+            if len(hypo['tokens'].size()) == 1:
+                hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
+                    hypo_tokens=hypo['tokens'].int().cpu(),
+                    src_str=src_str,
+                    alignment=hypo['alignment'].int().cpu() if hypo['alignment'] is not None else None,
+                    align_dict=align_dict,
+                    tgt_dict=tgt_dict,
+                    remove_bpe=args.remove_bpe,
+                )
+            else:
+                hypo_tokens, hypo_str, alignment = utils.post_process_char_prediction(
+                    hypo_tokens=hypo['tokens'].int().cpu(),
+                    src_str=src_str,
+                    alignment=hypo['alignment'].int().cpu() if hypo['alignment'] is not None else None,
+                    align_dict=align_dict,
+                    tgt_dict=tgt_dict,
+                    remove_bpe=args.remove_bpe,
+                )
+
             result.hypos.append('H\t{}\t{}'.format(hypo['score'], hypo_str))
             result.pos_scores.append('P\t{}'.format(
                 ' '.join(map(
@@ -164,7 +186,7 @@ def main(args):
     for inputs in buffered_read(args.buffer_size):
         indices = []
         results = []
-        for batch, batch_indices in make_batches(inputs, args, task, max_positions):
+        for batch, batch_indices in make_batches(inputs, args, task, max_positions, char_level):
             indices.extend(batch_indices)
             results += process_batch(batch)
 
