@@ -137,9 +137,7 @@ class RNNComposer(SpellingComposer):
 
 class SpellingEmbedding(nn.Embedding):
 
-    def __init__(self, num_embeddings, composer,
-                padding_idx=None, max_norm=None, norm_type=2,
-                scale_grad_by_freq=False, sparse=False, _weight=None):
+    def __init__(self, num_embeddings, composer, padding_idx=None):
         """
 
         :param num_embeddings:
@@ -151,8 +149,7 @@ class SpellingEmbedding(nn.Embedding):
         :param scale_grad_by_freq:
         :param sparse:
         """
-        super().__init__(num_embeddings, composer.char_emb_size, padding_idx,
-                        max_norm, norm_type, scale_grad_by_freq, sparse, _weight)
+        super().__init__(num_embeddings, composer.char_emb_size, padding_idx=padding_idx)
         nn.init.normal_(self.weight, 0, 0.1)
         if padding_idx is not None:
             nn.init.constant_(self.weight[padding_idx], 0)
@@ -166,9 +163,7 @@ class SpellingEmbedding(nn.Embedding):
         :param input: expected to be (batch, ..., word_len)
         :return:
         """
-        ret = F.embedding(
-            input, self.weight, self.padding_idx, self.max_norm,
-            self.norm_type, self.scale_grad_by_freq, self.sparse)
+        ret = F.embedding(input, self.weight, padding_idx=self.padding_idx)
         return self.composer(ret)
 
 

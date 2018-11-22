@@ -80,8 +80,12 @@ class FConvModel(FairseqModel):
                                  'non-autoregressive (NA) spelling generation')
         parser.add_argument('--max-word-len', type=int, default=25, metavar='N',
                             help='the maximum number of characters a word can have in a NA spelling generator')
-        parser.add_argument('--num-denoisier-layers', type=int, default=2, metavar='N',
-                            help='number of denoisier layers the NA spelling generator should have')
+        parser.add_argument('--num-bottleneck-layers', type=int, default=2, metavar='N',
+                            help='number of bottleneck layers the NA spelling generator should have')
+        parser.add_argument('--num-refinement-layers', type=int, default=2, metavar='N',
+                            help='number of refinement layers the NA spelling generator should have')
+        parser.add_argument('--num-tie-refinements', default=False, action='store_true',
+                            help='whether various refinement layers should be tied')
         parser.add_argument('--non-autoreg-char', default=False, action='store_true',
                             help='')
 
@@ -148,11 +152,12 @@ class FConvModel(FairseqModel):
                 fc_in_builder=Linear,
                 fc_out_builder=Linear,
                 hidden_size=in_channels,
-                char_embed_dim=args.char_embed_dim,
+                char_embed=decoder.embed_tokens,
                 pos_embed_dim=args.char_pos_embed_dim,
                 dropout=args.dropout,
                 max_word_len=args.max_word_len,
-                denoisier_layers=args.num_denoisier_layers,
+                bottleneck_layers=args.num_bottleneck_layers,
+                refinement_layers=args.num_refinement_layers,
             )
         return FConvModel(encoder, decoder, generator)
 
