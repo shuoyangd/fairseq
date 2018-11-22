@@ -525,29 +525,30 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
             normalize_scores, len_penalty, unk_penalty, retain_dropout,
             sampling, sampling_topk, sampling_temperature,
             diverse_beam_groups, diverse_beam_strength,)
+        self.eow = tgt_dict.eow()
 
     def compose_char_prob_naive(self, lprobs_char):
         """
         This will always give the most probable *SINGLE* word for each word-level hypothesis visited.
 
         Args:
-            lprobs_char: (max_word_len, batch_size * beam_size, vocab_size)
+            lprobs_char: (batch_size * beam_size, max_word_len, vocab_size)
         """
         lprobs_char[:, :, self.pad] = -math.inf
-        lprobs_char[:, :, self.unk] = -self.unk_penalty
-        max_prob, max_idx = torch.max(lprobs_char, dim=-1)  # (max_word_len, batch_size * beam_size)
-        eow_mask = (max_idx == self.eos)
-        cum_eow_mask = torch.cumsum(eow_mask, dim=0)
+        lprobs_char[:, :, self.unk] -= self.unk_penalty
+        max_prob, max_idx = torch.max(lprobs_char, dim=-1)  # (batch_size * beam_size, max_word_len)
+        eow_mask = (max_idx == self.eow)
+        cum_eow_mask = torch.cumsum(eow_mask, dim=1)
         # shift right by one to allow first eos
         cum_eow_mask = torch.cat(
             [
-                torch.zeros_like(cum_eow_mask[0, :]).unsqueeze(0),
-                cum_eow_mask[1:, :]
-            ], dim=0)
+                torch.zeros_like(cum_eow_mask[:, 0]).unsqueeze(1),
+                cum_eow_mask[:, :-1]
+            ], dim=1)
         word_seq_mask = (cum_eow_mask < 1)
         max_prob *= word_seq_mask.float()
-        lprob = torch.sum(max_prob, dim=0)
-        return lprob.unsqueeze(1)  # (batch_size * beam_size, 1)
+        lprob = torch.sum(max_prob, dim=1)
+        return lprob.unsqueeze(1), max_idx  # (batch_size * beam_size, 1)
 
     def _generate(self, encoder_input, beam_size=None, maxlen=None, prefix_tokens=None):
         """See generate"""
@@ -736,17 +737,26 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
                     encoder_outs[i] = model.encoder.reorder_encoder_out(encoder_outs[i], reorder_state)
 
             lprobs_char, avg_attn_scores = self._decode(tokens[:, :step + 1, :], encoder_outs, incremental_states)
-            # lprobs_char should be of shape (max_word_len, batch_size * beam_size, vocab_size)
+            # lprobs_char should be of shape (batch_size * beam_size, max_word_len, vocab_size)
             lprobs_char = lprobs_char.squeeze()
 
             # XXX: here is where ugliness starts:
             # lprobs_char is a character-level probability
             # but beam search still happens at word-level
-            # so we need to compose character-level probability into word-level probability for beam search
+            # so we need to compose character-level probability
+            # into word-level probability for beam search
             # which is what we call lprobs
-            lprobs = self.compose_char_prob_naive(lprobs_char)
+            # XXX: our scheme will only work for beam search
+            # diversity beam search doesn't worth it, but maybe
+            # this should be revisited later
+            lprobs, argmax = self.compose_char_prob_naive(lprobs_char)
+            # lprobs: (batch_size * beam_size, 1)
+            # argmax: (batch_size * beam_size, max_word_len)
+            pad_probs = -math.inf * torch.ones_like(lprobs)
             # FIXME: 1-best word is not enough, right now we just repeat for a couple of times
-            lprobs = lprobs.expand(-1, 2 * self.beam_size)
+            # 11/21: I think this is wrong, we shouldn't do it
+            # lprobs = lprobs.expand(-1, self.beam_size * self.beam_size)
+            lprobs = torch.cat((lprobs, pad_probs), dim=1)  # (batch_size * beam_size, 2)
             word_per_hypothesis = lprobs.size(1)
 
             # Record attention scores
@@ -763,7 +773,7 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
             eos_scores = buffer('eos_scores', type_of=scores)
             if step < maxlen:
                 if prefix_tokens is not None and step < prefix_tokens.size(1):
-                    probs_slice = lprobs.view(bsz, -1, max_word_len, lprobs.size(-1))[:, 0, :, :]  # (batch_size, max_word_len, vocab_size)
+                    probs_slice = lprobs.view(bsz, -1, lprobs.size(-1))[:, 0, :]  # (batch_size, beam_size, word_per_hypothesis)
                     cand_scores = torch.gather(
                         probs_slice, dim=2,
                         index=prefix_tokens[:, step].view(-1, 1).data
@@ -783,7 +793,7 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
                 # finalize all active hypotheses once we hit maxlen
                 # pick the hypothesis with the highest prob of EOS right now
                 torch.sort(
-                    lprobs[:, self.eos],
+                    lprobs[:, self.eos],  # FIXME: WRONG, the last dimension of lprobs is not vocab_size
                     descending=True,
                     out=(eos_scores, eos_bbsz_idx),
                 )
@@ -798,7 +808,8 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
             cand_bbsz_idx = cand_beams.add(bbsz_offsets)
 
             # finalize hypotheses that end in eos
-            eos_mask = cand_indices.eq(self.eos)
+            cand_indices = argmax[cand_bbsz_idx, :]  # (bsz, cand_size, max_word_len)
+            eos_mask = cand_indices[:, :, 0].eq(self.eos)
 
             finalized_sents = set()
             if step >= self.minlen:
@@ -843,7 +854,7 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
 
                 scores = scores.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, -1)
                 scores_buf.resize_as_(scores)
-                tokens = tokens.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, -1)
+                tokens = tokens.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, -1, max_word_len)
                 tokens_buf.resize_as_(tokens)
                 if attn is not None:
                     attn = attn.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, attn.size(1), -1)
@@ -889,8 +900,8 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
                 out=tokens_buf[:, :step + 1],
             )
             torch.gather(
-                cand_indices, dim=1, index=active_hypos,
-                out=tokens_buf.view(bsz, beam_size, -1)[:, :, step + 1],
+                cand_indices, dim=1, index=active_hypos.unsqueeze(2).expand(-1, -1, max_word_len),
+                out=tokens_buf.view(bsz, beam_size, -1, max_word_len)[:, :, step + 1, :]
             )
             if step > 0:
                 torch.index_select(

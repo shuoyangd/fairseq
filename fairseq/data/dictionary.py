@@ -217,6 +217,9 @@ class CharDictionary(Dictionary):
         t[-1, 0] = self.eos()
         return t
 
+    def eow(self):
+        return self.eow_index
+
     def save(self, f):
         """Stores dictionary into a text file"""
         if isinstance(f, str):

@@ -57,13 +57,16 @@ class BeamSearch(Search):
         super()._init_buffers(lprobs)
         bsz, beam_size, vocab_size = lprobs.size()
 
-        if step == 0:
+        if step == 0 and vocab_size >= beam_size:
             # at the first step all hypotheses are equally likely, so use
             # only the first beam
+            # if vocab_size < beam_size, it will fail for subsequent steps
             lprobs = lprobs[:, ::beam_size, :].contiguous()
-        else:
+        elif step > 0:
             # make probs contain cumulative scores for each hypothesis
             lprobs.add_(scores[:, :, step - 1].unsqueeze(-1))
+        else:
+            pass  # do nothing to avoid small vocab size failure
 
         torch.topk(
             lprobs.view(bsz, -1),

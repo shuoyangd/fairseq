@@ -286,6 +286,33 @@ def replace_unk(hypo_str, src_str, alignment, align_dict, unk):
     return ' '.join(hypo_tokens)
 
 
+def post_process_char_prediction(hypo_tokens, src_str, alignment, align_dict, tgt_dict, remove_bpe):
+    from fairseq import tokenizer
+    sentence_length = hypo_tokens.size(0)
+
+    eow_mask = (hypo_tokens == tgt_dict.eow())
+    cum_eow_mask = torch.cumsum(eow_mask, dim=1)
+    # shift right by one to allow first eos
+    cum_eow_mask = torch.cat(
+        [
+            torch.zeros_like(cum_eow_mask[:, 0]).unsqueeze(1),
+            cum_eow_mask[:, :-1]
+        ], dim=1)
+    shifted_eow_mask = (cum_eow_mask < 1)
+    pad_mask = (hypo_tokens != tgt_dict.pad())
+    str_mask = shifted_eow_mask * pad_mask
+    hypo_tokens = torch.masked_select(hypo_tokens, str_mask)
+    hypo_str = tgt_dict.string(hypo_tokens, remove_bpe)
+    hypo_str = "".join(filter(lambda x: ord(x) < 128, hypo_str))
+    if align_dict is not None:
+        hypo_str = replace_unk(hypo_str, src_str, alignment, align_dict, tgt_dict.unk_string())
+    if align_dict is not None or remove_bpe is not None:
+        # Convert back to tokens for evaluating with unk replacement or without BPE
+        # Note that the dictionary can be modified inside the method.
+        hypo_tokens = tokenizer.Tokenizer.tokenize(hypo_str, tgt_dict, add_if_not_exist=True)
+    return hypo_tokens, hypo_str, alignment
+
+
 def post_process_prediction(hypo_tokens, src_str, alignment, align_dict, tgt_dict, remove_bpe):
     from fairseq import tokenizer
     hypo_str = tgt_dict.string(hypo_tokens, remove_bpe)

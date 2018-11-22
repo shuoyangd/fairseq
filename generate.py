@@ -124,6 +124,7 @@ def main(args):
                 src_str = src_dict.string(src_tokens, args.remove_bpe)
                 if has_target:
                     target_str = tgt_dict.string(target_tokens, args.remove_bpe, escape_unk=True)
+            src_str = "".join([x if ord(x) < 128 else '?' for x in src_str])  # remove encoding garbage
 
             if not args.quiet:
                 print('S-{}\t{}'.format(sample_id, src_str))
@@ -132,14 +133,24 @@ def main(args):
 
             # Process top predictions
             for i, hypo in enumerate(hypos[:min(len(hypos), args.nbest)]):
-                hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
-                    hypo_tokens=hypo['tokens'].int().cpu(),
-                    src_str=src_str,
-                    alignment=hypo['alignment'].int().cpu() if hypo['alignment'] is not None else None,
-                    align_dict=align_dict,
-                    tgt_dict=tgt_dict,
-                    remove_bpe=args.remove_bpe,
-                )
+                if len(hypo['tokens'].size()) == 1:
+                    hypo_tokens, hypo_str, alignment = utils.post_process_prediction(
+                        hypo_tokens=hypo['tokens'].int().cpu(),
+                        src_str=src_str,
+                        alignment=hypo['alignment'].int().cpu() if hypo['alignment'] is not None else None,
+                        align_dict=align_dict,
+                        tgt_dict=tgt_dict,
+                        remove_bpe=args.remove_bpe,
+                    )
+                else:
+                    hypo_tokens, hypo_str, alignment = utils.post_process_char_prediction(
+                        hypo_tokens=hypo['tokens'].int().cpu(),
+                        src_str=src_str,
+                        alignment=hypo['alignment'].int().cpu() if hypo['alignment'] is not None else None,
+                        align_dict=align_dict,
+                        tgt_dict=tgt_dict,
+                        remove_bpe=args.remove_bpe,
+                    )
 
                 if not args.quiet:
                     print('H-{}\t{}\t{}'.format(sample_id, hypo['score'], hypo_str))
