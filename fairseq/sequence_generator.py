@@ -793,7 +793,8 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
                 # finalize all active hypotheses once we hit maxlen
                 # pick the hypothesis with the highest prob of EOS right now
                 torch.sort(
-                    lprobs[:, self.eos],  # FIXME: WRONG, the last dimension of lprobs is not vocab_size
+                    # lprobs[:, self.eos]
+                    lprobs[:, 0],  # FIXME: this is slightly wrong, as we should be asking for eos probability here
                     descending=True,
                     out=(eos_scores, eos_bbsz_idx),
                 )
