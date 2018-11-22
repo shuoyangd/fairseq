@@ -149,6 +149,8 @@ def add_dataset_args(parser, train=False, gen=False):
                        help='maximum number of tokens in a batch')
     group.add_argument('--max-sentences', '--batch-size', type=int, metavar='N',
                        help='maximum number of sentences in a batch')
+    group.add_argument('--char-level', default=False, action='store_true',
+                       help='whether character-level preprocessing should be performed')
     if train:
         group.add_argument('--train-subset', default='train', metavar='SPLIT',
                            choices=['train', 'valid', 'test'],

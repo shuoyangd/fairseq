@@ -11,7 +11,7 @@ import os
 
 from fairseq import options
 from fairseq.data import (
-    data_utils, Dictionary, LanguagePairDataset, ConcatDataset,
+    data_utils, Dictionary, CharDictionary, LanguagePairDataset, ConcatDataset,
     IndexedRawTextDataset, IndexedCachedDataset, IndexedDataset
 )
 
@@ -84,7 +84,10 @@ class TranslationTask(FairseqTask):
 
         # load dictionaries
         src_dict = Dictionary.load(os.path.join(args.data[0], 'dict.{}.txt'.format(args.source_lang)))
-        tgt_dict = Dictionary.load(os.path.join(args.data[0], 'dict.{}.txt'.format(args.target_lang)))
+        if args.char_level:
+            tgt_dict = CharDictionary.load(os.path.join(args.data[0], 'dict.{}.txt'.format(args.target_lang)))
+        else:
+            tgt_dict = Dictionary.load(os.path.join(args.data[0], 'dict.{}.txt'.format(args.target_lang)))
         assert src_dict.pad() == tgt_dict.pad()
         assert src_dict.eos() == tgt_dict.eos()
         assert src_dict.unk() == tgt_dict.unk()
