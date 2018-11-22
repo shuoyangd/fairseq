@@ -303,7 +303,7 @@ def post_process_char_prediction(hypo_tokens, src_str, alignment, align_dict, tg
     str_mask = shifted_eow_mask * pad_mask
     hypo_tokens = torch.masked_select(hypo_tokens, str_mask)
     hypo_str = tgt_dict.string(hypo_tokens, remove_bpe)
-    hypo_str = "".join(filter(lambda x: ord(x) < 128, hypo_str))
+    hypo_str = hypo_str.replace(' ', '').replace("</w>", ' ')
     if align_dict is not None:
         hypo_str = replace_unk(hypo_str, src_str, alignment, align_dict, tgt_dict.unk_string())
     if align_dict is not None or remove_bpe is not None:
