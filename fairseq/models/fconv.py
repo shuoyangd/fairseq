@@ -75,6 +75,8 @@ class FConvModel(FairseqModel):
                             help='enables a embedding that\'s built from spelling')
         parser.add_argument('--char-embed-dim', type=int, metavar='N', default=128,
                             help='dimension of the character embedding')
+        parser.add_argument('--char-embed-composer', type=str, choices=['cnn', 'rnn'], default='cnn',
+                            help="composer used to construct word embedding from characters.")
         parser.add_argument('--char-pos-embed-dim', type=int, metavar='N',
                             help='dimension of the positional embedding for ' +
                                  'non-autoregressive (NA) spelling generation')
@@ -124,6 +126,7 @@ class FConvModel(FairseqModel):
             max_positions=args.max_target_positions,
             spelling_embed=args.spelling_embedding,
             char_embed_dim=args.char_embed_dim,
+            char_embed_composer=args.char_embed_composer,
         )
 
         convolutions = extend_conv_spec(eval(args.decoder_layers))
@@ -437,7 +440,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
             self, dictionary, embed_dim=512, embed_dict=None,
             max_positions=1024, convolutions=((512, 3),) * 20, attention=True,
             dropout=0.1, positional_embeddings=True, left_pad=False,
-            spelling_embed=False, char_embed_dim=128,
+            spelling_embed=False, char_embed_dim=128, char_embed_composer="cnn",
     ):
         super().__init__(dictionary)
         self.register_buffer('version', torch.Tensor([2]))
@@ -458,8 +461,12 @@ class FConvDecoder(FairseqIncrementalDecoder):
         padding_idx = dictionary.pad()
         if spelling_embed and not embed_dict:
             # TODO: we don't load a pre-trained character embedding for the moment, maybe soon
-            embed_composer = CNNComposer(char_embed_dim, embed_dim)  # TODO: hard-code to CNN for the moment
-            # embed_composer = RNNComposer(char_embed_dim, embed_dim)  # TODO: hard-code to RNN for the moment
+            if char_embed_composer == "cnn":
+                embed_composer = CNNComposer(char_embed_dim, embed_dim)
+            elif char_embed_composer == "rnn":
+                embed_composer = RNNComposer(char_embed_dim, embed_dim)
+            else:
+                raise NotImplementedError
             self.embed_tokens = SpellingEmbedding(num_embeddings, embed_composer, padding_idx)
         else:
             self.embed_tokens = Embedding(num_embeddings, embed_dim, padding_idx)
