@@ -10,14 +10,16 @@ Data pre-processing: build vocabularies and binarize training data.
 """
 
 import argparse
+import codecs
 from collections import Counter
 from itertools import zip_longest
 import os
 import shutil
 
 from fairseq.data import indexed_dataset, dictionary
+from fairseq.bpe import BPE
 from fairseq.tokenizer import (
-    Tokenizer, tokenize_line, CharTokenizer, tokenize_line_char
+    Tokenizer, tokenize_line, CharTokenizer, tokenize_line_char, tokenize_line_bpe
 )
 from multiprocessing import Pool, Manager, Process
 
@@ -47,6 +49,9 @@ def get_parser():
                         help='Pad dictionary size to be multiple of N')
     parser.add_argument('--workers', metavar='N', default=1, type=int, help='number of parallel workers')
     parser.add_argument('--char-level', action='store_true', help='whether character-level preprocessing should be performed')
+    parser.add_argument('--bpe-level', action='store_true', help='whether bpe-level preprocessing should be performed')
+    parser.add_argument('--bpe-model', metavar="PATH", default=None,
+                        help='bpe model used when performing bpe-level preprocessing')
 
     return parser
 
@@ -62,10 +67,16 @@ def main(args):
             Tokenizer.add_file_to_dictionary(filename, d, tokenize_line, args.workers)
         return d
 
-    def build_dictionary_char(filenames):
+    def build_dictionary_char(filenames, bpe_level=False, bpe_model=""):
         d = dictionary.CharDictionary()
+        if bpe_level:
+            code = codecs.open(bpe_model, encoding='utf-8')
+            model = BPE(code)
+            tokenize_func = lambda line: tokenize_line_bpe(line, model)
+        else:
+            tokenize_func = tokenize_line_char
         for filename in filenames:
-            CharTokenizer.add_file_to_dictionary(filename, d, tokenize_line_char, args.workers)
+            CharTokenizer.add_file_to_dictionary(filename, d, tokenize_func, args.workers)
         return d
 
     def train_path(lang):
@@ -100,9 +111,10 @@ def main(args):
         if target:
             if args.tgtdict:
                 tgt_dict = dictionary.Dictionary.load(args.tgtdict)
-            elif args.char_level:
+            elif args.char_level or args.bpe_level:
                 assert args.trainpref, "--trainpref must be set if --tgtdict is not specified"
-                tgt_dict = build_dictionary_char([train_path(args.target_lang)])
+                tgt_dict = build_dictionary_char([train_path(args.target_lang)],
+                    bpe_level=args.bpe_level, bpe_model=args.bpe_model)
             else:
                 assert args.trainpref, "--trainpref must be set if --tgtdict is not specified"
                 tgt_dict = build_dictionary([train_path(args.target_lang)])
@@ -122,7 +134,9 @@ def main(args):
             )
         tgt_dict.save(dict_path(args.target_lang))
 
-    def make_binary_dataset(input_prefix, output_prefix, lang, num_workers, char_level=False):
+    def make_binary_dataset(input_prefix, output_prefix, lang, num_workers, char_level=False,
+            bpe_level=False, bpe_model=""):
+
         dict = dictionary.Dictionary.load(dict_path(lang))
         assert (not char_level) or (char_level and isinstance(dict, dictionary.CharDictionary))
         print('| [{}] Dictionary: {} types'.format(lang, len(dict) - 1))
@@ -135,10 +149,7 @@ def main(args):
             n_seq_tok[1] += worker_result['ntok']
 
         input_file = '{}{}'.format(input_prefix, ('.' + lang) if lang is not None else '')
-        if char_level:
-            offsets = CharTokenizer.find_offsets(input_file, num_workers)
-        else:
-            offsets = Tokenizer.find_offsets(input_file, num_workers)
+        offsets = Tokenizer.find_offsets(input_file, num_workers)
         pool = None
         if num_workers > 1:
             pool = Pool(processes=num_workers-1)
@@ -153,6 +164,12 @@ def main(args):
         if char_level:
             merge_result(CharTokenizer.binarize(input_file, dict, lambda t: ds.add_item(t),
                                             offset=0, end=offsets[1]))
+        elif bpe_level and bpe_model != "":
+            code = codecs.open(bpe_model, encoding='utf-8')
+            model = BPE(code)
+            tokenize_line_with_bpe_model = lambda line: tokenize_line_bpe(line, model)
+            merge_result(CharTokenizer.binarize(input_file, dict, lambda t: ds.add_item(t),
+                                            tokenize=tokenize_line_with_bpe_model, offset=0, end=offsets[1]))
         else:
             merge_result(Tokenizer.binarize(input_file, dict, lambda t: ds.add_item(t),
                                             offset=0, end=offsets[1]))
@@ -168,16 +185,16 @@ def main(args):
 
         ds.finalize(dataset_dest_file(args, output_prefix, lang, 'idx'))
 
-
         print('| [{}] {}: {} sents, {} tokens, {:.3}% replaced by {}'.format(
             lang, input_file, n_seq_tok[0], n_seq_tok[1],
             100 * sum(replaced.values()) / n_seq_tok[1], dict.unk_word))
 
 
-
-    def make_dataset(input_prefix, output_prefix, lang, num_workers=1, char_level=False):
+    def make_dataset(input_prefix, output_prefix, lang, num_workers=1, char_level=False,
+            bpe_level=False, bpe_model=""):
         if args.output_format == 'binary':
-            make_binary_dataset(input_prefix, output_prefix, lang, num_workers, char_level=char_level)
+            make_binary_dataset(input_prefix, output_prefix, lang, num_workers, char_level=char_level,
+                    bpe_level=bpe_level, bpe_model=bpe_model)
         elif args.output_format == 'raw':
             # Copy original text file to destination folder
             output_text_file = dest_path(
@@ -186,21 +203,22 @@ def main(args):
             )
             shutil.copyfile(file_name(input_prefix, lang), output_text_file)
 
-    def make_all(lang, char_level=False):
+    def make_all(lang, char_level=False, bpe_level=False, bpe_model=""):
         if args.trainpref:
-            make_dataset(args.trainpref, 'train', lang, num_workers=args.workers, char_level=char_level)
+            make_dataset(args.trainpref, 'train', lang, num_workers=args.workers, char_level=char_level,
+                   bpe_level=bpe_level, bpe_model=bpe_model)
         if args.validpref:
             for k, validpref in enumerate(args.validpref.split(',')):
                 outprefix = 'valid{}'.format(k) if k > 0 else 'valid'
-                make_dataset(validpref, outprefix, lang, char_level=char_level)
+                make_dataset(validpref, outprefix, lang, char_level=char_level, bpe_level=bpe_level, bpe_model=bpe_model)
         if args.testpref:
             for k, testpref in enumerate(args.testpref.split(',')):
                 outprefix = 'test{}'.format(k) if k > 0 else 'test'
-                make_dataset(testpref, outprefix, lang, char_level=char_level)
+                make_dataset(testpref, outprefix, lang, char_level=char_level, bpe_level=bpe_level, bpe_model=bpe_model)
 
     make_all(args.source_lang)
     if target:
-        make_all(args.target_lang, char_level=args.char_level)
+        make_all(args.target_lang, char_level=args.char_level, bpe_level=args.bpe_level, bpe_model=args.bpe_model)
 
     print('| Wrote preprocessed data to {}'.format(args.destdir))
 
@@ -253,6 +271,14 @@ def binarize(args, filename, dict, output_prefix, lang, offset, end):
 
     if args.char_level:
         res = CharTokenizer.binarize(filename, dict, consumer, offset=offset, end=end)
+    elif args.bpe_level:
+        code = codecs.open(args.bpe_model, encoding='utf-8')
+        model = BPE(code)
+        tokenize_line_with_bpe_model = lambda line: tokenize_line_bpe(line, model)
+        res = CharTokenizer.binarize(filename, dict, consumer,
+                tokenize=tokenize_line_with_bpe_model,
+                offset=offset, end=end
+              )
     else:
         res = Tokenizer.binarize(filename, dict, consumer, offset=offset, end=end)
     ds.finalize(dataset_dest_file(args, output_prefix, lang, 'idx'))

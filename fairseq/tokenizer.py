@@ -7,6 +7,7 @@
 
 from collections import Counter
 import os, re
+import pdb
 
 import torch
 from multiprocessing import Pool
@@ -22,9 +23,14 @@ def tokenize_line(line):
 def tokenize_line_char(line):
     line = SPACE_NORMALIZER.sub(" ", line)
     line = line.strip()
-    line = line.strip()
     char_list = [ merge_reserve(list(s)) for s in line.split() ]
     return char_list
+
+def tokenize_line_bpe(line, bpe_module):
+    line = SPACE_NORMALIZER.sub(" ", line)
+    line = line.strip()
+    bpe_list = [ bpe_module.segment_tokens([w]) for w in line.split() ]
+    return bpe_list
 
 def merge_reserve(char_list):
   ret = []
@@ -245,18 +251,6 @@ class CharTokenizer:
                 consumer(ids)
                 line = f.readline()
         return {'nseq': nseq, 'nunk': sum(replaced.values()), 'ntok': ntok, 'replaced': replaced}
-
-    @staticmethod
-    def find_offsets(filename, num_chunks):
-        with open(filename, 'r') as f:
-            size = os.fstat(f.fileno()).st_size
-            chunk_size = size // num_chunks
-            offsets = [0 for _ in range(num_chunks + 1)]
-            for i in range(1, num_chunks):
-                f.seek(chunk_size * i)
-                safe_readline(f)
-                offsets[i] = f.tell()
-            return offsets
 
     @staticmethod
     def tokenize(line, dict, tokenize=tokenize_line_char, add_if_not_exist=True,

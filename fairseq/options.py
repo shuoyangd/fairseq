@@ -332,6 +332,8 @@ def add_generation_args(parser):
                        help='if set, uses attention feedback to compute and print alignment to source tokens')
     group.add_argument('--model-overrides', default="{}", type=str, metavar='DICT',
                        help='a dictionary used to override model args at generation that were used during model training')
+    group.add_argument('--non-autoreg-bpe', action='store_true',
+                       help='Non-autoregressive BPE')
     return group
 
 

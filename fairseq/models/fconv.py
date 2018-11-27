@@ -508,6 +508,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
         self.fc2 = self.fc3 = None
 
     def forward(self, prev_output_tokens, encoder_out_dict=None, incremental_state=None):
+
         if encoder_out_dict is not None:
             encoder_out = encoder_out_dict['encoder_out']
             encoder_padding_mask = encoder_out_dict['encoder_padding_mask']

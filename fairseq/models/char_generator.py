@@ -3,8 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import pdb
-
 from . import FairseqGenerator
 from fairseq.modules import LearnedPositionalEmbedding, MultiheadAttention
 
@@ -101,7 +99,8 @@ class NonAutoRegCharGenerator(FairseqGenerator):
     def __init__(self, char_dictionary, fc_in_builder, fc_out_builder, hidden_size,
                  char_embed, pos_embed_dim, dropout, max_word_len,
                  input_embed=None, always_have_fc_in=False,
-                 bottleneck_layers=0, bottleneck_factor=2,
+                 use_decoder_highway=False,
+                 bottleneck_layers=0, bottleneck_factor=4,
                  refinement_layers=0, tie_refinements=False):
         """
         A basic non-autoregressive character generator, without length prediction
@@ -120,6 +119,7 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         :param input_embed:
             TODO: unused in the original code
         :param always_have_fc_in:
+        :param use_decoder_highway:
         :param bottleneck_layers:
         :param bottleneck_factor:
         :param refinement_layers:

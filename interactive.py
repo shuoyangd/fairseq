@@ -36,7 +36,7 @@ def buffered_read(buffer_size):
         yield buffer
 
 
-def make_batches(lines, args, task, max_positions, char_level=False):
+def make_batches(lines, args, task, max_positions):
     tokens = [
         tokenizer.Tokenizer.tokenize(src_str, task.source_dictionary, add_if_not_exist=False).long()
         for src_str in lines
@@ -136,6 +136,15 @@ def main(args):
                     tgt_dict=tgt_dict,
                     remove_bpe=args.remove_bpe,
                 )
+            elif args.non_autoreg_bpe:
+                hypo_tokens, hypo_str, alignment = utils.post_process_bpe_prediction(
+                    hypo_tokens=hypo['tokens'].int().cpu(),
+                    src_str=src_str,
+                    alignment=hypo['alignment'].int().cpu() if hypo['alignment'] is not None else None,
+                    align_dict=align_dict,
+                    tgt_dict=tgt_dict,
+                    remove_bpe=args.remove_bpe,
+                )
             else:
                 hypo_tokens, hypo_str, alignment = utils.post_process_char_prediction(
                     hypo_tokens=hypo['tokens'].int().cpu(),
@@ -186,7 +195,7 @@ def main(args):
     for inputs in buffered_read(args.buffer_size):
         indices = []
         results = []
-        for batch, batch_indices in make_batches(inputs, args, task, max_positions, char_level):
+        for batch, batch_indices in make_batches(inputs, args, task, max_positions):
             indices.extend(batch_indices)
             results += process_batch(batch)
 
