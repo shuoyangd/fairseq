@@ -90,8 +90,13 @@ class FConvModel(FairseqModel):
                             help='composer used to conduct refinements')
         parser.add_argument('--tie-refinements', default=False, action='store_true',
                             help='whether various refinement layers should be tied')
+
         parser.add_argument('--non-autoreg-char', default=False, action='store_true',
                             help='whether non-autoregressive (NA) spelling generation should be performend')
+        parser.add_argument('--length-prediction', default=False, action='store_true',
+                            help='whether length prediction should be performend')
+        parser.add_argument('--refinement-autoenc', default=False, action='store_true',
+                            help='whether refinement layers should be trained with autoencoder loss')
 
 
     @classmethod
@@ -165,6 +170,8 @@ class FConvModel(FairseqModel):
                 refinement_layers=args.num_refinement_layers,
                 tie_refinements=args.tie_refinements,
                 refinement_composition=args.refinement_composition,
+                refinement_autoenc=args.refinement_autoenc,
+                length_prediction=args.length_prediction,
             )
         return FConvModel(encoder, decoder, generator)
 
