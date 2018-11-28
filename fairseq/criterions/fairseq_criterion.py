@@ -14,7 +14,7 @@ class FairseqCriterion(_Loss):
         super().__init__()
         self.args = args
         self.padding_idx = task.target_dictionary.pad()
-        self.tgt_dict = task.dataset("train").tgt_dict  # FIXME: sample
+        self.tgt_dict = task.target_dictionary
         self.task = task
 
     @staticmethod

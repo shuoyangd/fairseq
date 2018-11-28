@@ -86,10 +86,12 @@ class FConvModel(FairseqModel):
                             help='number of bottleneck layers the NA spelling generator should have')
         parser.add_argument('--num-refinement-layers', type=int, default=2, metavar='N',
                             help='number of refinement layers the NA spelling generator should have')
+        parser.add_argument('--refinement-composition', type=str, choices=['attn', 'cnn'], default='cnn',
+                            help='composer used to conduct refinements')
         parser.add_argument('--tie-refinements', default=False, action='store_true',
                             help='whether various refinement layers should be tied')
         parser.add_argument('--non-autoreg-char', default=False, action='store_true',
-                            help='')
+                            help='whether non-autoregressive (NA) spelling generation should be performend')
 
 
     @classmethod
@@ -162,6 +164,7 @@ class FConvModel(FairseqModel):
                 bottleneck_layers=args.num_bottleneck_layers,
                 refinement_layers=args.num_refinement_layers,
                 tie_refinements=args.tie_refinements,
+                refinement_composition=args.refinement_composition,
             )
         return FConvModel(encoder, decoder, generator)
 
