@@ -262,7 +262,7 @@ class NonAutoRegCharGenerator(FairseqGenerator):
             if self.training:
                 max_word_len = self.max_word_len
             else:
-                max_word_len = torch.max(word_len)
+                max_word_len = torch.max(word_len) if torch.max(word_len) > 6 else 6
         else:
             length_lprobs = None
             max_word_len = self.max_word_len

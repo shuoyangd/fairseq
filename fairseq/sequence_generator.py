@@ -580,12 +580,12 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
             assert isinstance(model.generator, NonAutoRegCharGenerator)
             assert model.generator.max_word_len == self.models[0].generator.max_word_len
 
-        max_word_len = self.models[0].generator.max_word_len
+        global_max_word_len = self.models[0].generator.max_word_len
 
         # initialize buffers
         scores = src_tokens.data.new(bsz * beam_size, maxlen + 1).float().fill_(0)
         scores_buf = scores.clone()
-        tokens = src_tokens.data.new(bsz * beam_size, maxlen + 2, max_word_len).fill_(self.pad)
+        tokens = src_tokens.data.new(bsz * beam_size, maxlen + 2, global_max_word_len).fill_(self.pad)
         tokens_buf = tokens.clone()
         tokens[:, :, 0] = self.eos  # XXX: (shuoyang) eos at beginning?
         attn, attn_buf = None, None
@@ -752,6 +752,8 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
             lprobs, argmax = self.compose_char_prob_naive(lprobs_char)
             # lprobs: (batch_size * beam_size, 1)
             # argmax: (batch_size * beam_size, max_word_len)
+            # note that this is different from global_max_word_len
+            max_word_len = argmax.size(-1)
             pad_probs = -math.inf * torch.ones_like(lprobs)
             # FIXME: 1-best word is not enough, right now we just repeat for a couple of times
             # 11/21: I think this is wrong, we shouldn't do it
@@ -855,7 +857,7 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
 
                 scores = scores.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, -1)
                 scores_buf.resize_as_(scores)
-                tokens = tokens.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, -1, max_word_len)
+                tokens = tokens.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, -1, global_max_word_len)
                 tokens_buf.resize_as_(tokens)
                 if attn is not None:
                     attn = attn.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, attn.size(1), -1)
@@ -902,7 +904,7 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
             )
             torch.gather(
                 cand_indices, dim=1, index=active_hypos.unsqueeze(2).expand(-1, -1, max_word_len),
-                out=tokens_buf.view(bsz, beam_size, -1, max_word_len)[:, :, step + 1, :]
+                out=tokens_buf.view(bsz, beam_size, -1, global_max_word_len)[:, :, step + 1, :]
             )
             if step > 0:
                 torch.index_select(
