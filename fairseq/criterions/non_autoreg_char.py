@@ -6,6 +6,7 @@
 # can be found in the PATENTS file in the same directory.
 
 import math
+import sys
 import torch
 import torch.nn.functional as F
 
@@ -22,7 +23,7 @@ class NonAutoRegCriterion(FairseqCriterion):
 
     def __init__(self, args, task):
         super().__init__(args, task)
-        self.corrupt_beta = args.corrupt_beta
+        self.corrupt_lambda = args.corrupt_lambda
 
     def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
@@ -34,6 +35,17 @@ class NonAutoRegCriterion(FairseqCriterion):
         """
         net_output = model(**sample['net_input'])
         lprobs, length_lprobs = model.get_normalized_probs(net_output, log_probs=True)
+        target = model.get_targets(sample, net_output)
+
+        # FIXME: sample
+        """
+        lprobs_pred = lprobs[-1].clone()
+        lprobs_pred[:, :, :, self.padding_idx] = -99
+        _, idxes = torch.max(lprobs_pred, dim=-1)
+        sys.stdout.buffer.write(("pred: " + self.tgt_dict.string(idxes[0, 3]) + "\n").encode('utf-8'))
+        sys.stdout.buffer.write(("tgt: " + self.tgt_dict.string(target[0, 3]) + "\n").encode('utf-8'))
+        """
+
         num_refinements = len(lprobs)
         if num_refinements == 1:
             lprobs = lprobs[0]
@@ -43,24 +55,13 @@ class NonAutoRegCriterion(FairseqCriterion):
         else:
             raise ValueError("no log probability calculated")
 
-        target = model.get_targets(sample, net_output)
-
         assert hasattr(model, "generator") and \
             isinstance(model.generator, NonAutoRegCharGenerator)
-
-        # FIXME: sample
-        """
-        lprobs_pred = lprobs.clone()
-        lprobs_pred[:, :, :, self.padding_idx] = -99
-        _, idxes = torch.max(lprobs_pred, dim=-1)
-        sys.stdout.buffer.write(("pred: " + self.tgt_dict.string(idxes[0, 0]) + "\n").encode('utf-8'))
-        sys.stdout.buffer.write(("tgt: " + self.tgt_dict.string(target[0, 0]) + "\n").encode('utf-8'))
-        """
 
         # length prediction loss
         lp_loss = torch.sum(torch.cuda.FloatTensor([0.0]))
         max_word_len = model.generator.max_word_len
-        if not length_lprobs:
+        if length_lprobs is None:
             # if we are making length predictions,
             # pad/truncate the target to be of the same length as max_word_len
             # (we don't operate on predictions because there is no good way to pad the predictions)
@@ -84,9 +85,11 @@ class NonAutoRegCriterion(FairseqCriterion):
                 target = target[:, :, :lprobs.size(2)]
 
         dae_loss = torch.sum(torch.cuda.FloatTensor([0.0]))
-        if model.generator.refinement_autoenc:
+        p_dae = 0.5  # from Lee et al. 2018
+        dice = utils.item(torch.bernoulli(torch.cuda.FloatTensor([p_dae])).long())
+        if model.generator.refinement_autoenc and dice:
             vocab_size = len(self.tgt_dict)
-            corrupted_target = utils.corrupt_process(target, vocab_size, self.corrupt_beta)
+            corrupted_target = utils.corrupt_process(target, vocab_size, self.corrupt_lambda)
             dae_dist = model.generator.refinement_autoenc(corrupted_target, net_output[0])
             dae_dist = dae_dist.view(-1, dae_dist.size(-1))
             flat_target = target.contiguous().view(-1)

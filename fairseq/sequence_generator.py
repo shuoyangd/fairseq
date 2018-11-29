@@ -951,4 +951,5 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
                     attn = attn['attn']
                 attn = attn[:, -1, :]
         probs, _ = model.get_normalized_probs(decoder_out, log_probs=log_probs)
+        probs = probs[-1]
         return probs, attn

@@ -304,6 +304,7 @@ class LengthPredictionGenerator(nn.Module):
         self.linear = CharGenLinear(hidden_size, max_len)
 
     def forward(self, decoder_embed):
+        decoder_embed.detach_()  # TODO: decide whether the stop gradient should be here
         return torch.nn.functional.log_softmax(
             torch.nn.functional.relu(self.linear(decoder_embed)), dim=-1)
 

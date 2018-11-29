@@ -98,8 +98,8 @@ class FConvModel(FairseqModel):
                             help='whether refinement layers should be trained with autoencoder loss')
         parser.add_argument('--corrupt-prev-output', default=False, action='store_true',
                             help='whether we should corrupt the previous output token in the decoder')
-        parser.add_argument('--corrupt-beta', type=float, default=0.5,
-                            help='the fraction of characters to corrupt')
+        parser.add_argument('--corrupt-lambda', type=float, default=3,
+                            help='lambda value for the exponential distribution for corruption')
 
     @classmethod
     def build_model(cls, args, task):
@@ -137,7 +137,7 @@ class FConvModel(FairseqModel):
             char_embed_dim=args.char_embed_dim,
             char_embed_composer=args.char_embed_composer,
             corrupt_prev_output=args.corrupt_prev_output,
-            corrupt_beta=args.corrupt_beta,
+            corrupt_lambda=args.corrupt_lambda,
         )
 
         convolutions = extend_conv_spec(eval(args.decoder_layers))
@@ -455,7 +455,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
             max_positions=1024, convolutions=((512, 3),) * 20, attention=True,
             dropout=0.1, positional_embeddings=True, left_pad=False,
             spelling_embed=False, char_embed_dim=128, char_embed_composer="cnn",
-            corrupt_prev_output=False, corrupt_beta=0.5,
+            corrupt_prev_output=False, corrupt_lambda=3,
     ):
         super().__init__(dictionary)
         self.register_buffer('version', torch.Tensor([2]))
@@ -463,7 +463,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
         self.left_pad = left_pad
         self.need_attn = True
         self.corrupt_prev_output=corrupt_prev_output
-        self.corrupt_beta = corrupt_beta
+        self.corrupt_lambda = corrupt_lambda
 
         convolutions = extend_conv_spec(convolutions)
         in_channels = convolutions[0][0]
@@ -529,7 +529,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
         if self.training and self.corrupt_prev_output:
             prev_output_tokens = utils.corrupt_process(prev_output_tokens,
                                                        self.embed_tokens.num_embeddings,
-                                                       self.corrupt_beta)
+                                                       self.corrupt_lambda)
 
         if encoder_out_dict is not None:
             encoder_out = encoder_out_dict['encoder_out']

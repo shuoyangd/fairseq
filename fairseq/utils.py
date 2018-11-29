@@ -483,7 +483,7 @@ def resolve_max_positions(*args):
     return max_positions
 
 
-def corrupt_process(target, vocab_size, beta=0.5):
+def corrupt_process(target, vocab_size, lambd = 3):
     """
     Implemented according to Lee et al. 2018
 
@@ -493,10 +493,12 @@ def corrupt_process(target, vocab_size, beta=0.5):
 
     corrupted_target = target.clone()
     batch_size, max_seq_len, max_word_len = target.size()
-    is_corrupt = target.new_zeros(max_word_len,).float().uniform_(0, 1)
-    is_corrupt_1 = (is_corrupt >= 0) * (is_corrupt < beta / 3)  # (0 <= is_corrupt < 1)
-    is_corrupt_2 = (is_corrupt >= beta / 3) * (is_corrupt < beta * 2 / 3)  # (1 <= is_corrupt < 2)
-    is_corrupt_3 = (is_corrupt >= beta * 2 / 3) * (is_corrupt < beta)  # (2 <= is_corrupt < 3)
+    p_corrupt = torch.arange(max_word_len).type_as(target.float()).exponential_(lambd=lambd)
+    is_corrupt = p_corrupt.bernoulli().byte()
+    corrupt_type = target.new_ones(max_word_len,).float().uniform_(0, 1)
+    is_corrupt_1 = (corrupt_type < 1/3) * is_corrupt
+    is_corrupt_2 = (corrupt_type >= 1/3) * (corrupt_type < 2/3) * is_corrupt
+    is_corrupt_3 = (corrupt_type >= 2/3) * (corrupt_type < 1) * is_corrupt
 
     # corrupt_1: shift
     is_corrupt_1_shift = is_corrupt_1.clone()
