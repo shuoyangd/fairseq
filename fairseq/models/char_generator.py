@@ -208,6 +208,12 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         else:
             self.bottleneck = None
 
+        interconn_layer=True
+        if interconn_layer:
+            self.interconn_layer = nn.Conv1d(hidden_size + pos_embed_dim, hidden_size + pos_embed_dim, 3, padding=1)
+        else:
+            self.interconn_layer = None
+
         self.refinement_layers = refinement_layers
         self.tie_refinements = tie_refinements
         if tie_refinements:
@@ -275,6 +281,8 @@ class NonAutoRegCharGenerator(FairseqGenerator):
 
         if self.bottleneck:
             x = self.bottleneck(x)
+
+        x = self.interconn_layer(x)
 
         logits = self.fc_out(x)  # (batch_size, max_seq_len, max_word_len, num_embeddings)
 
