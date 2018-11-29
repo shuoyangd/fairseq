@@ -2,7 +2,6 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import warnings
 
 from . import FairseqGenerator
 from fairseq.modules import LearnedPositionalEmbedding, MultiheadAttention
@@ -75,7 +74,7 @@ class RefinementLayer(nn.Module):
         pos_embeds = self.pos_embed(pos_idx)  # (batch_size, max_seq_len, max_word_len, pos_embed_dim)
         pos_embeds = pos_embeds.view(batch_size * max_seq_len, max_word_len, -1).transpose(0, 1)
 
-        intermediate_lprob = torch.log_softmax(logits, dim=-1)
+        intermediate_lprob = torch.nn.functional.log_softmax(logits, dim=-1)
         # logits = logits.view(-1, self.num_embeddings)
         # FIXME: get rid of next three lines -- forget about gumbel softmax for the moment
         # char_one_hot = F.gumbel_softmax(logits).view(batch_size, max_seq_len, max_word_len, self.num_embeddings)
@@ -138,7 +137,6 @@ class NonAutoRegCharGenerator(FairseqGenerator):
     def __init__(self, char_dictionary, fc_in_builder, fc_out_builder, hidden_size,
                  char_embed, pos_embed_dim, dropout, max_word_len,
                  input_embed=None, always_have_fc_in=False,
-                 use_decoder_highway=False,
                  bottleneck_layers=0, bottleneck_factor=4,
                  refinement_layers=0, tie_refinements=False,
                  refinement_composition="cnn",
@@ -162,7 +160,6 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         :param input_embed:
             TODO: unused in the original code
         :param always_have_fc_in:
-        :param use_decoder_highway:
         :param bottleneck_layers:
         :param bottleneck_factor:
         :param refinement_layers:
@@ -258,8 +255,20 @@ class NonAutoRegCharGenerator(FairseqGenerator):
             x = F.dropout(x, p=self.dropout, training=self.training)  # TODO: transformer doesn't seem to be using this
         batch_size = x.size(0)
         max_seq_len = x.size(1)
-        x = x.unsqueeze(2).expand(-1, -1, self.max_word_len, -1)  # (batch_size, max_seq_len, max_word_len, hidden_dim)
-        pos_idx = torch.arange(self.max_word_len).type_as(x).long()
+
+        if self.length_predictor is not None:
+            length_lprobs = self.length_predictor(decoder_embed)
+            word_len = torch.argmax(length_lprobs, dim=-1)
+            if self.training:
+                max_word_len = self.max_word_len
+            else:
+                max_word_len = torch.max(word_len)
+        else:
+            length_lprobs = None
+            max_word_len = self.max_word_len
+
+        x = x.unsqueeze(2).expand(-1, -1, max_word_len, -1)  # (batch_size, max_seq_len, max_word_len, hidden_dim)
+        pos_idx = torch.arange(max_word_len).type_as(x).long()
         pos_idx = pos_idx.unsqueeze(0).expand(batch_size, max_seq_len, -1)  # (batch_size, max_seq_len, max_word_len)
         pos = self.pos_embed(pos_idx)  # (batch_size, max_seq_len, max_word_len, pos_embed_dim)
         x = torch.cat((x, pos), dim=3)  # (batch_size, max_seq_len, max_word_len, hidden_dim + pos_embed_dim)
@@ -269,7 +278,7 @@ class NonAutoRegCharGenerator(FairseqGenerator):
 
         logits = self.fc_out(x)  # (batch_size, max_seq_len, max_word_len, num_embeddings)
 
-        # FIXME: should use get_normalized probs here..
+        # FIXME: should use get_normalized probs instead of softmax below.. but we are fine for now
         lprobs = []
         if self.refinement:
             if self.tie_refinements:
@@ -283,8 +292,9 @@ class NonAutoRegCharGenerator(FairseqGenerator):
                     if self.training:
                         lprobs.append(lprob)
 
-        lprobs.append(torch.log_softmax(logits, dim=-1))
-        return lprobs
+        lprobs.append(torch.nn.functional.log_softmax(logits, dim=-1))
+        # TODO: note that we are the only generator that returns two values -- maybe there are nicer work-around?
+        return lprobs, length_lprobs
 
 
 class LengthPredictionGenerator(nn.Module):

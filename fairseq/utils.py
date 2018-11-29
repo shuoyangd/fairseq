@@ -493,10 +493,10 @@ def corrupt_process(target, vocab_size, beta=0.5):
 
     corrupted_target = target.clone()
     batch_size, max_seq_len, max_word_len = target.size()
-    is_corrupt = target.new_zeros(max_word_len,).float().uniform_(0, 6)
-    is_corrupt_1 = (is_corrupt >= 0) * (is_corrupt < 1)  # (0 <= is_corrupt < 1)
-    is_corrupt_2 = (is_corrupt >= 1) * (is_corrupt < 2)  # (1 <= is_corrupt < 2)
-    is_corrupt_3 = (is_corrupt >= 2) * (is_corrupt < 3)  # (2 <= is_corrupt < 3)
+    is_corrupt = target.new_zeros(max_word_len,).float().uniform_(0, 1)
+    is_corrupt_1 = (is_corrupt >= 0) * (is_corrupt < beta / 3)  # (0 <= is_corrupt < 1)
+    is_corrupt_2 = (is_corrupt >= beta / 3) * (is_corrupt < beta * 2 / 3)  # (1 <= is_corrupt < 2)
+    is_corrupt_3 = (is_corrupt >= beta * 2 / 3) * (is_corrupt < beta)  # (2 <= is_corrupt < 3)
 
     # corrupt_1: shift
     is_corrupt_1_shift = is_corrupt_1.clone()

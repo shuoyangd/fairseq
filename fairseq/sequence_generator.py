@@ -935,3 +935,20 @@ class NonAutoRegCharSequenceGenerator(SequenceGenerator):
             finalized[sent] = sorted(finalized[sent], key=lambda r: r['score'], reverse=True)
 
         return finalized
+
+    def _decode_one(self, tokens, model, encoder_out, incremental_states, log_probs):
+        with torch.no_grad():
+            if incremental_states[model] is not None:
+                decoder_out = list(model.decoder(tokens, encoder_out, incremental_state=incremental_states[model]))
+            else:
+                decoder_out = list(model.decoder(tokens, encoder_out))
+            decoder_out[0] = decoder_out[0][:, -1, :]
+            attn = decoder_out[1]
+            if type(attn) is dict:
+                attn = attn['attn']
+            if attn is not None:
+                if type(attn) is dict:
+                    attn = attn['attn']
+                attn = attn[:, -1, :]
+        probs, _ = model.get_normalized_probs(decoder_out, log_probs=log_probs)
+        return probs, attn

@@ -90,14 +90,16 @@ class FConvModel(FairseqModel):
                             help='composer used to conduct refinements')
         parser.add_argument('--tie-refinements', default=False, action='store_true',
                             help='whether various refinement layers should be tied')
-
         parser.add_argument('--non-autoreg-char', default=False, action='store_true',
                             help='whether non-autoregressive (NA) spelling generation should be performend')
         parser.add_argument('--length-prediction', default=False, action='store_true',
                             help='whether length prediction should be performend')
         parser.add_argument('--refinement-autoenc', default=False, action='store_true',
                             help='whether refinement layers should be trained with autoencoder loss')
-
+        parser.add_argument('--corrupt-prev-output', default=False, action='store_true',
+                            help='whether we should corrupt the previous output token in the decoder')
+        parser.add_argument('--corrupt-beta', type=float, default=0.5,
+                            help='the fraction of characters to corrupt')
 
     @classmethod
     def build_model(cls, args, task):
@@ -134,6 +136,8 @@ class FConvModel(FairseqModel):
             spelling_embed=args.spelling_embedding,
             char_embed_dim=args.char_embed_dim,
             char_embed_composer=args.char_embed_composer,
+            corrupt_prev_output=args.corrupt_prev_output,
+            corrupt_beta=args.corrupt_beta,
         )
 
         convolutions = extend_conv_spec(eval(args.decoder_layers))
@@ -451,12 +455,15 @@ class FConvDecoder(FairseqIncrementalDecoder):
             max_positions=1024, convolutions=((512, 3),) * 20, attention=True,
             dropout=0.1, positional_embeddings=True, left_pad=False,
             spelling_embed=False, char_embed_dim=128, char_embed_composer="cnn",
+            corrupt_prev_output=False, corrupt_beta=0.5,
     ):
         super().__init__(dictionary)
         self.register_buffer('version', torch.Tensor([2]))
         self.dropout = dropout
         self.left_pad = left_pad
         self.need_attn = True
+        self.corrupt_prev_output=corrupt_prev_output
+        self.corrupt_beta = corrupt_beta
 
         convolutions = extend_conv_spec(convolutions)
         in_channels = convolutions[0][0]
@@ -518,6 +525,11 @@ class FConvDecoder(FairseqIncrementalDecoder):
         self.fc2 = self.fc3 = None
 
     def forward(self, prev_output_tokens, encoder_out_dict=None, incremental_state=None):
+
+        if self.training and self.corrupt_prev_output:
+            prev_output_tokens = utils.corrupt_process(prev_output_tokens,
+                                                       self.embed_tokens.num_embeddings,
+                                                       self.corrupt_beta)
 
         if encoder_out_dict is not None:
             encoder_out = encoder_out_dict['encoder_out']

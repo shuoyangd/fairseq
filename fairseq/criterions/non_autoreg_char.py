@@ -22,6 +22,7 @@ class NonAutoRegCriterion(FairseqCriterion):
 
     def __init__(self, args, task):
         super().__init__(args, task)
+        self.corrupt_beta = args.corrupt_beta
 
     def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
@@ -32,7 +33,7 @@ class NonAutoRegCriterion(FairseqCriterion):
         3) logging outputs to display while training
         """
         net_output = model(**sample['net_input'])
-        lprobs = model.get_normalized_probs(net_output, log_probs=True)
+        lprobs, length_lprobs = model.get_normalized_probs(net_output, log_probs=True)
         num_refinements = len(lprobs)
         if num_refinements == 1:
             lprobs = lprobs[0]
@@ -59,7 +60,7 @@ class NonAutoRegCriterion(FairseqCriterion):
         # length prediction loss
         lp_loss = torch.sum(torch.cuda.FloatTensor([0.0]))
         max_word_len = model.generator.max_word_len
-        if not model.generator.length_predictor:
+        if not length_lprobs:
             # if we are making length predictions,
             # pad/truncate the target to be of the same length as max_word_len
             # (we don't operate on predictions because there is no good way to pad the predictions)
@@ -69,14 +70,13 @@ class NonAutoRegCriterion(FairseqCriterion):
             elif target.size(2) > max_word_len:
                 target = target[:, :, :max_word_len]
         else:
-            length_dist = model.generator.length_predictor(net_output[0])
             valid_token = (target != self.tgt_dict.pad_index)
             length_target = torch.sum(valid_token, dim=-1).long()  # (batch_size, max_seq_len)
             length_target[length_target > max_word_len - 1] = max_word_len - 1
 
-            length_dist = length_dist.view(-1, length_dist.size(-1))
+            length_lprobs = length_lprobs.view(-1, length_lprobs.size(-1))
             length_target = length_target.contiguous().view(-1)
-            lp_loss = F.nll_loss(length_dist, length_target, size_average=False, reduce=reduce)
+            lp_loss = F.nll_loss(length_lprobs, length_target, size_average=False, reduce=reduce)
 
             if lprobs.size(2) > target.size(2):
                 lprobs = lprobs[:, :, :target.size(2), :]
@@ -86,7 +86,7 @@ class NonAutoRegCriterion(FairseqCriterion):
         dae_loss = torch.sum(torch.cuda.FloatTensor([0.0]))
         if model.generator.refinement_autoenc:
             vocab_size = len(self.tgt_dict)
-            corrupted_target = utils.corrupt_process(target, vocab_size)
+            corrupted_target = utils.corrupt_process(target, vocab_size, self.corrupt_beta)
             dae_dist = model.generator.refinement_autoenc(corrupted_target, net_output[0])
             dae_dist = dae_dist.view(-1, dae_dist.size(-1))
             flat_target = target.contiguous().view(-1)
