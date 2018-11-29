@@ -8,6 +8,7 @@
 from collections import defaultdict, OrderedDict
 import logging
 import os
+import pdb
 import re
 import torch
 import traceback
@@ -490,30 +491,30 @@ def corrupt_process(target, vocab_size, beta=0.5):
     :return:
     """
 
+    corrupted_target = target.clone()
     batch_size, max_seq_len, max_word_len = target.size()
-    is_corrupt = torch.empty(max_word_len,).uniform_(0, 6)
-    is_corrupt_1 = (0 <= is_corrupt < 1)
-    is_corrupt_2 = (1 <= is_corrupt < 2)
-    is_corrupt_3 = (2 <= is_corrupt < 3)
+    is_corrupt = target.new_zeros(max_word_len,).float().uniform_(0, 6)
+    is_corrupt_1 = (is_corrupt >= 0) * (is_corrupt < 1)  # (0 <= is_corrupt < 1)
+    is_corrupt_2 = (is_corrupt >= 1) * (is_corrupt < 2)  # (1 <= is_corrupt < 2)
+    is_corrupt_3 = (is_corrupt >= 2) * (is_corrupt < 3)  # (2 <= is_corrupt < 3)
 
     # corrupt_1: shift
     is_corrupt_1_shift = is_corrupt_1.clone()
     is_corrupt_1[-1] = 0  # the last unit cannot be shifted
     is_corrupt_1_shift[0] = 0
     is_corrupt_1_shift[1:] = is_corrupt_1[0:-1]
-    target[:, :, is_corrupt_1_shift] = target[:, :, is_corrupt_1]
+    corrupted_target[:, :, is_corrupt_1_shift] = target[:, :, is_corrupt_1].clone()
 
     # corrupt_2: replace
-    replacement = torch.empty(max_word_len,).uniform_(0, vocab_size).floor_()
-    target[:, :, is_corrupt_2] = replacement[is_corrupt_2]
+    replacement = target.new_zeros(max_word_len).float().uniform_(0, vocab_size).floor_()
+    corrupted_target[:, :, is_corrupt_2] = replacement[is_corrupt_2].long()
 
     # corrput_3: swap
     is_corrupt_3_shift = is_corrupt_3.clone()
     is_corrupt_3[-1] = 0
     is_corrupt_3_shift[0] = 0
     is_corrupt_3_shift[1:] = is_corrupt_3[0:-1]
-    tmp = target[is_corrupt_3].clone()
-    target[is_corrupt_3] = target[is_corrupt_3_shift]
-    target[is_corrupt_3_shift] = tmp
+    corrupted_target[:, :, is_corrupt_3] = target[:, :, is_corrupt_3_shift].clone()
+    corrupted_target[:, :, is_corrupt_3_shift] = target[:, :, is_corrupt_3].clone()
 
-    return target
+    return corrupted_target

@@ -75,13 +75,14 @@ class RefinementLayer(nn.Module):
         pos_embeds = self.pos_embed(pos_idx)  # (batch_size, max_seq_len, max_word_len, pos_embed_dim)
         pos_embeds = pos_embeds.view(batch_size * max_seq_len, max_word_len, -1).transpose(0, 1)
 
-        logits = logits.view(-1, self.num_embeddings)
+        intermediate_lprob = torch.log_softmax(logits, dim=-1)
+        # logits = logits.view(-1, self.num_embeddings)
         # FIXME: get rid of next three lines -- forget about gumbel softmax for the moment
         # char_one_hot = F.gumbel_softmax(logits).view(batch_size, max_seq_len, max_word_len, self.num_embeddings)
         # char_embeds = char_one_hot.matmul(self.char_embed.weight)  # FIXME: make sure we are not using fancier embedding retrieval
 
-        char_idx = torch.argmax(logits, -1).view(batch_size, max_seq_len, max_word_len)  # no need for softmax
-        char_idx.detach_()  # make sure gradient does not flow from here
+        char_idx = torch.argmax(intermediate_lprob, -1).view(batch_size, max_seq_len, max_word_len)  # no need for softmax
+        char_idx = char_idx.detach()  # make sure gradient does not flow from here (cannot detach view in-place)
 
         # ----------- composition options start -----------
 
@@ -91,7 +92,7 @@ class RefinementLayer(nn.Module):
 
         elif self.composition == "cnn":
             # cmposition option 2: cnn_compose
-            comp_embeds = self.cnn_compose(char_idx, decoder_embed)
+            comp_embeds = self.cnn_composition(char_idx, decoder_embed)
 
         else:
             raise NotImplementedError
@@ -106,7 +107,7 @@ class RefinementLayer(nn.Module):
 
         bn_out = self.bottleneck(bn_in)
         ret_logit = self.fc_out(bn_out).view(batch_size, max_seq_len, max_word_len, -1)  # (batch_size, max_seq_len, max_word_len, num_embeddings)
-        return ret_logit
+        return ret_logit, intermediate_lprob
 
     def attn_composition(self, char_idx, pos_embeds, decoder_embed):
         batch_size, max_seq_len, max_word_len = char_idx.size()
@@ -177,8 +178,9 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         self.fc_in = None
 
         char_embed_dim = char_embed.embedding_dim
-        self.char_embed = nn.Embedding(num_embeddings, char_embed_dim, padding_idx=char_embed.padding_idx)
-        self.char_embed.weight = char_embed.weight  # tie the weight
+        # self.char_embed = nn.Embedding(num_embeddings, char_embed_dim, padding_idx=char_embed.padding_idx)
+        # self.char_embed.weight = char_embed.weight  # tie the weight
+        self.char_embed = char_embed
 
         # note this positional embedding shouldn't be shared with the word-level positional embedding in, e.g., fconv
         # self.pos_embed = PositionalEmbedding(max_word_len, pos_embed_dim, char_dictionary.pad(), left_pad)
@@ -229,14 +231,14 @@ class NonAutoRegCharGenerator(FairseqGenerator):
             else:
                 self.refinement = None
 
-        if refinement_autoenc:
+        if refinement_autoenc and tie_refinements:
             self.refinement_autoenc = RefinementAutoEncoder(self.refinement)
-        elif not tie_refinements:
+        elif refinement_autoenc:
             raise AttributeError("Refinement autoenc loss has to be used with tied refinement layers.")
         else:
             self.refinement_autoenc = None
 
-        if length_prediction and tie_refinements:
+        if length_prediction:
             self.length_predictor = LengthPredictionGenerator(hidden_size, max_word_len)
         else:
             self.length_predictor = None
@@ -265,34 +267,41 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         if self.bottleneck:
             x = self.bottleneck(x)
 
-        x = self.fc_out(x)  # (batch_size, max_seq_len, max_word_len, num_embeddings)
+        logits = self.fc_out(x)  # (batch_size, max_seq_len, max_word_len, num_embeddings)
 
+        # FIXME: should use get_normalized probs here..
+        lprobs = []
         if self.refinement:
             if self.tie_refinements:
                 for _ in range(self.refinement_layers):
-                    x = self.refinement(x, decoder_embed)
+                    logits, lprob = self.refinement(logits, decoder_embed)
+                    if self.training:
+                        lprobs.append(lprob)
             else:
                 for ref in self.refinement:
-                    x = ref(x, decoder_embed)
+                    logits, lprob = ref(logits, decoder_embed)
+                    if self.training:
+                        lprobs.append(lprob)
 
-        return self.get_normalized_probs(x, log_probs, sample)
+        lprobs.append(torch.log_softmax(logits, dim=-1))
+        return lprobs
 
 
 class LengthPredictionGenerator(nn.Module):
 
     def __init__(self, hidden_size, max_len):
-        super(LengthPredictionGenerator, self).__init__(self)
+        super(LengthPredictionGenerator, self).__init__()
         self.linear = CharGenLinear(hidden_size, max_len)
 
     def forward(self, decoder_embed):
-        return torch.nn.functional.softmax(
+        return torch.nn.functional.log_softmax(
             torch.nn.functional.relu(self.linear(decoder_embed)), dim=-1)
 
 
 class RefinementAutoEncoder(nn.Module):
 
     def __init__(self, refinement_layer):
-        super(RefinementAutoEncoder, self).__init__(self)
+        super(RefinementAutoEncoder, self).__init__()
         self.refinement_layer = refinement_layer
 
     def forward(self, noisy_char_idx, decoder_embed):
@@ -305,13 +314,13 @@ class RefinementAutoEncoder(nn.Module):
 
         # ----------- composition options start -----------
 
-        if self.composition == "attn":
+        if self.refinement_layer.composition == "attn":
             # composition option 1: attn_compose
             comp_embeds = self.refinement_layer.attn_composition(noisy_char_idx, pos_embeds, decoder_embed)
 
-        elif self.composition == "cnn":
+        elif self.refinement_layer.composition == "cnn":
             # cmposition option 2: cnn_compose
-            comp_embeds = self.cnn_compose(noisy_char_idx, decoder_embed)
+            comp_embeds = self.refinement_layer.cnn_composition(noisy_char_idx, decoder_embed)
 
         else:
             raise NotImplementedError
@@ -324,9 +333,9 @@ class RefinementAutoEncoder(nn.Module):
             (comp_embeds, pos_embeds.transpose_(0, 1)),
             dim=-1)
 
-        bn_out = self.bottleneck(bn_in)
-        logit = self.fc_out(bn_out).view(batch_size, max_seq_len, max_word_len, -1)  # (batch_size, max_seq_len, max_word_len, num_embeddings)
-        return torch.nn.functional.softmax(logit, dim=-1)
+        bn_out = self.refinement_layer.bottleneck(bn_in)
+        logit = self.refinement_layer.fc_out(bn_out).view(batch_size, max_seq_len, max_word_len, -1)  # (batch_size, max_seq_len, max_word_len, num_embeddings)
+        return torch.nn.functional.log_softmax(logit, dim=-1)
 
 
 # copied from fconv

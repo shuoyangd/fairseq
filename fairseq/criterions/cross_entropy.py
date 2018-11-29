@@ -9,7 +9,6 @@ import math
 import sys
 import torch
 import torch.nn.functional as F
-import pdb
 
 from fairseq import utils
 
@@ -35,6 +34,15 @@ class CrossEntropyCriterion(FairseqCriterion):
         lprobs = model.get_normalized_probs(net_output, log_probs=True)
         target = model.get_targets(sample, net_output)
         if len(target.size()) == 3:
+            num_refinements = len(lprobs)
+            if num_refinements == 1:
+                lprobs = lprobs[0]
+            elif num_refinements > 1:
+                from functools import reduce
+                lprobs = reduce(lambda x, y: x + y, lprobs)
+            else:
+                raise ValueError("no log probability calculated")
+
             assert hasattr(model, "generator") and \
                 isinstance(model.generator, NonAutoRegCharGenerator)
             max_word_len = model.generator.max_word_len
