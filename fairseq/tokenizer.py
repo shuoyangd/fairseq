@@ -224,7 +224,7 @@ class CharTokenizer:
     @staticmethod
     def binarize(filename, dict, consumer, tokenize=tokenize_line_char,
                             append_eos=True, reverse_order=False,
-                            offset=0, end=-1):
+                            offset=0, end=-1, compose_dict=None):
         nseq, ntok = 0, 0
         replaced = Counter()
         def replaced_consumer(word, idx):
@@ -245,6 +245,7 @@ class CharTokenizer:
                     consumer=replaced_consumer,
                     append_eos=append_eos,
                     reverse_order=reverse_order,
+                    compose_dict=compose_dict
                 )
                 nseq += 1
                 ntok += len(ids)
@@ -254,7 +255,8 @@ class CharTokenizer:
 
     @staticmethod
     def tokenize(line, dict, tokenize=tokenize_line_char, add_if_not_exist=True,
-                 consumer=None, append_eos=True, append_eow=True, reverse_order=False):
+                 consumer=None, append_eos=True, append_eow=True,
+                 reverse_order=False, compose_dict=None):
         chars = tokenize(line)
         if reverse_order:
             chars = list(reversed(chars))
@@ -263,10 +265,16 @@ class CharTokenizer:
         if max_word_len == 0:  # empty sentence, should not proceed further
             return torch.IntTensor([])
 
-        ids = torch.IntTensor(\
-                nwords + 1 if append_eos else nwords, \
-                max_word_len + 1 if append_eow else max_word_len \
-              )
+        if compose_dict is None:
+            ids = torch.IntTensor(\
+                    nwords + 1 if append_eos else nwords, \
+                    max_word_len + 1 if append_eow else max_word_len \
+                )
+        else:
+            ids = torch.IntTensor(\
+                    nwords + 1 if append_eos else nwords, \
+                    max_word_len + 2 if append_eow else max_word_len + 1 \
+                )
         ids.fill_(dict.pad_index)
 
         for i, word in enumerate(chars):
@@ -279,6 +287,9 @@ class CharTokenizer:
                 if consumer is not None:
                     consumer(char, idx)
                 ids[i, j] = idx
+            if compose_dict is not None:
+                word_idx = compose_dict.add_symbol("".join(word))
+                ids[:, -1] = word_idx
             if append_eow:
                 ids[i, nchars] = dict.eow_index
         if append_eos:

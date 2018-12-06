@@ -61,10 +61,11 @@ class TranslationTask(FairseqTask):
         parser.add_argument('--upsample-primary', default=1, type=int,
                             help='amount to upsample primary dataset')
 
-    def __init__(self, args, src_dict, tgt_dict):
+    def __init__(self, args, src_dict, tgt_dict, tgt_dict_comp=None):
         super().__init__(args)
         self.src_dict = src_dict
         self.tgt_dict = tgt_dict
+        self.tgt_dict_comp = tgt_dict_comp
 
     @classmethod
     def setup_task(cls, args, **kwargs):
@@ -88,13 +89,18 @@ class TranslationTask(FairseqTask):
             tgt_dict = CharDictionary.load(os.path.join(args.data[0], 'dict.{}.txt'.format(args.target_lang)))
         else:
             tgt_dict = Dictionary.load(os.path.join(args.data[0], 'dict.{}.txt'.format(args.target_lang)))
+
+        tgt_dict_comp = None
+        if os.path.isfile(os.path.join(args.data[0], 'dict.{}.txt'.format(args.target_lang + '.comp'))):
+            tgt_dict_comp = Dictionary.load(os.path.join(args.data[0], 'dict.{}.txt'.format(args.target_lang + '.comp')))
+
         assert src_dict.pad() == tgt_dict.pad()
         assert src_dict.eos() == tgt_dict.eos()
         assert src_dict.unk() == tgt_dict.unk()
         print('| [{}] dictionary: {} types'.format(args.source_lang, len(src_dict)))
         print('| [{}] dictionary: {} types'.format(args.target_lang, len(tgt_dict)))
 
-        return cls(args, src_dict, tgt_dict)
+        return cls(args, src_dict, tgt_dict, tgt_dict_comp)
 
     def load_dataset(self, split, combine=False):
         """Load a given dataset split.

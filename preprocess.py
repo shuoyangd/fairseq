@@ -52,6 +52,8 @@ def get_parser():
     parser.add_argument('--bpe-level', action='store_true', help='whether bpe-level preprocessing should be performed')
     parser.add_argument('--bpe-model', metavar="PATH", default=None,
                         help='bpe model used when performing bpe-level preprocessing')
+    parser.add_argument('--composition-info', action='store_true',
+                        help='when performing character')
 
     return parser
 
@@ -102,12 +104,14 @@ def main(args):
             for lang in [args.source_lang, args.target_lang]
         ]))
         tgt_dict = src_dict
+        tgt_dict_comp = None
     else:
         if args.srcdict:
             src_dict = dictionary.Dictionary.load(args.srcdict)
         else:
             assert args.trainpref, "--trainpref must be set if --srcdict is not specified"
             src_dict = build_dictionary([train_path(args.source_lang)])
+        tgt_dict_comp = None
         if target:
             if args.tgtdict:
                 tgt_dict = dictionary.Dictionary.load(args.tgtdict)
@@ -115,6 +119,8 @@ def main(args):
                 assert args.trainpref, "--trainpref must be set if --tgtdict is not specified"
                 tgt_dict = build_dictionary_char([train_path(args.target_lang)],
                     bpe_level=args.bpe_level, bpe_model=args.bpe_model)
+                if args.composition_info:
+                    tgt_dict_comp = build_dictionary([train_path(args.target_lang)])
             else:
                 assert args.trainpref, "--trainpref must be set if --tgtdict is not specified"
                 tgt_dict = build_dictionary([train_path(args.target_lang)])
@@ -132,10 +138,18 @@ def main(args):
                 nwords=args.nwordstgt,
                 padding_factor=args.padding_factor,
             )
+            if args.composition_info:
+                tgt_dict_comp.finalize(
+                    threshold=args.thresholdtgt,
+                    nwords=args.nwordstgt,
+                    padding_factor=args.padding_factor,
+                )
         tgt_dict.save(dict_path(args.target_lang))
+        if args.composition_info:
+            tgt_dict_comp.save(dict_path(args.target_lang + ".comp"))
 
     def make_binary_dataset(input_prefix, output_prefix, lang, num_workers, char_level=False,
-            bpe_level=False, bpe_model=""):
+            bpe_level=False, bpe_model="", compose_dict=None):
 
         dict = dictionary.Dictionary.load(dict_path(lang))
         assert (not char_level) or (char_level and isinstance(dict, dictionary.CharDictionary))
@@ -157,19 +171,23 @@ def main(args):
                 prefix = "{}{}".format(output_prefix, worker_id)
                 pool.apply_async(binarize, (args, input_file, dict, prefix, lang,
                                             offsets[worker_id],
-                                            offsets[worker_id + 1]), callback=merge_result)
+                                            offsets[worker_id + 1],
+                                            compose_dict),
+                                            callback=merge_result)
             pool.close()
 
         ds = indexed_dataset.IndexedDatasetBuilder(dataset_dest_file(args, output_prefix, lang, 'bin'))
         if char_level:
             merge_result(CharTokenizer.binarize(input_file, dict, lambda t: ds.add_item(t),
-                                            offset=0, end=offsets[1]))
+                                            offset=0, end=offsets[1], compose_dict=compose_dict))
         elif bpe_level and bpe_model != "":
             code = codecs.open(bpe_model, encoding='utf-8')
             model = BPE(code)
             tokenize_line_with_bpe_model = lambda line: tokenize_line_bpe(line, model)
             merge_result(CharTokenizer.binarize(input_file, dict, lambda t: ds.add_item(t),
-                                            tokenize=tokenize_line_with_bpe_model, offset=0, end=offsets[1]))
+                                            tokenize=tokenize_line_with_bpe_model,
+                                            offset=0, end=offsets[1],
+                                            compose_dict=compose_dict))
         else:
             merge_result(Tokenizer.binarize(input_file, dict, lambda t: ds.add_item(t),
                                             offset=0, end=offsets[1]))
@@ -191,10 +209,10 @@ def main(args):
 
 
     def make_dataset(input_prefix, output_prefix, lang, num_workers=1, char_level=False,
-            bpe_level=False, bpe_model=""):
+            bpe_level=False, bpe_model="", compose_dict=None):
         if args.output_format == 'binary':
             make_binary_dataset(input_prefix, output_prefix, lang, num_workers, char_level=char_level,
-                    bpe_level=bpe_level, bpe_model=bpe_model)
+                    bpe_level=bpe_level, bpe_model=bpe_model, compose_dict=compose_dict)
         elif args.output_format == 'raw':
             # Copy original text file to destination folder
             output_text_file = dest_path(
@@ -203,22 +221,25 @@ def main(args):
             )
             shutil.copyfile(file_name(input_prefix, lang), output_text_file)
 
-    def make_all(lang, char_level=False, bpe_level=False, bpe_model=""):
+    def make_all(lang, char_level=False, bpe_level=False, bpe_model="", compose_dict=None):
         if args.trainpref:
             make_dataset(args.trainpref, 'train', lang, num_workers=args.workers, char_level=char_level,
-                   bpe_level=bpe_level, bpe_model=bpe_model)
+                   bpe_level=bpe_level, bpe_model=bpe_model, compose_dict=compose_dict)
         if args.validpref:
             for k, validpref in enumerate(args.validpref.split(',')):
                 outprefix = 'valid{}'.format(k) if k > 0 else 'valid'
-                make_dataset(validpref, outprefix, lang, char_level=char_level, bpe_level=bpe_level, bpe_model=bpe_model)
+                make_dataset(validpref, outprefix, lang, char_level=char_level,
+                             bpe_level=bpe_level, bpe_model=bpe_model, compose_dict=compose_dict)
         if args.testpref:
             for k, testpref in enumerate(args.testpref.split(',')):
                 outprefix = 'test{}'.format(k) if k > 0 else 'test'
-                make_dataset(testpref, outprefix, lang, char_level=char_level, bpe_level=bpe_level, bpe_model=bpe_model)
+                make_dataset(testpref, outprefix, lang, char_level=char_level,
+                             bpe_level=bpe_level, bpe_model=bpe_model, compose_dict=compose_dict)
 
     make_all(args.source_lang)
     if target:
-        make_all(args.target_lang, char_level=args.char_level, bpe_level=args.bpe_level, bpe_model=args.bpe_model)
+        make_all(args.target_lang, char_level=args.char_level,
+                 bpe_level=args.bpe_level, bpe_model=args.bpe_model, compose_dict=tgt_dict_comp)
 
     print('| Wrote preprocessed data to {}'.format(args.destdir))
 
@@ -263,21 +284,23 @@ def main(args):
 
 
 
-def binarize(args, filename, dict, output_prefix, lang, offset, end):
+def binarize(args, filename, dict, output_prefix, lang, offset, end, compose_dict=None):
 
     ds = indexed_dataset.IndexedDatasetBuilder(dataset_dest_file(args, output_prefix, lang, 'bin'))
     def consumer(tensor):
         ds.add_item(tensor)
 
     if args.char_level:
-        res = CharTokenizer.binarize(filename, dict, consumer, offset=offset, end=end)
+        res = CharTokenizer.binarize(filename, dict, consumer,
+                                     offset=offset, end=end,
+                                     compose_dict=compose_dict)
     elif args.bpe_level:
         code = codecs.open(args.bpe_model, encoding='utf-8')
         model = BPE(code)
         tokenize_line_with_bpe_model = lambda line: tokenize_line_bpe(line, model)
         res = CharTokenizer.binarize(filename, dict, consumer,
                 tokenize=tokenize_line_with_bpe_model,
-                offset=offset, end=end
+                offset=offset, end=end, compose_dict=compose_dict
               )
     else:
         res = Tokenizer.binarize(filename, dict, consumer, offset=offset, end=end)

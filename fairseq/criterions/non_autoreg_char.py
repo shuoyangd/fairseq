@@ -10,8 +10,6 @@ import sys
 import torch
 import torch.nn.functional as F
 
-import pdb
-
 from fairseq import utils
 
 from . import FairseqCriterion, register_criterion
@@ -24,6 +22,7 @@ class NonAutoRegCriterion(FairseqCriterion):
     def __init__(self, args, task):
         super().__init__(args, task)
         self.corrupt_lambda = args.corrupt_lambda
+        self.composition_info = (task.tgt_dict_comp is not None)
 
     def forward(self, model, sample, reduce=True):
         """Compute the loss for the given sample.
@@ -34,8 +33,11 @@ class NonAutoRegCriterion(FairseqCriterion):
         3) logging outputs to display while training
         """
         net_output = model(**sample['net_input'])
-        lprobs, length_lprobs = model.get_normalized_probs(net_output, log_probs=True)
+        lprobs, length_lprobs, word_lprobs = model.get_normalized_probs(net_output, log_probs=True)
         target = model.get_targets(sample, net_output)
+        if self.composition_info:
+            word_target = target[:, :, -1]
+            target = target[:, :, :-1]
 
         # FIXME: sample
         """
@@ -62,15 +64,15 @@ class NonAutoRegCriterion(FairseqCriterion):
         lp_loss = torch.sum(torch.cuda.FloatTensor([0.0]))
         max_word_len = model.generator.max_word_len
         if length_lprobs is None:
-            # if we are making length predictions,
-            # pad/truncate the target to be of the same length as max_word_len
-            # (we don't operate on predictions because there is no good way to pad the predictions)
             if target.size(2) < max_word_len:
                 pad = torch.ones_like(lprobs[:, :, :max_word_len - target.size(2), 0]).long()  # lprobs only provides the shape
                 target = torch.cat([target, pad], dim=2)
             elif target.size(2) > max_word_len:
                 target = target[:, :, :max_word_len]
         else:
+            # if we are making length predictions,
+            # pad/truncate the target to be of the same length as max_word_len
+            # (we don't operate on predictions because there is no good way to pad the predictions)
             valid_token = (target != self.tgt_dict.pad_index)
             length_target = torch.sum(valid_token, dim=-1).long()  # (batch_size, max_seq_len)
             length_target[length_target > max_word_len - 1] = max_word_len - 1
@@ -97,18 +99,28 @@ class NonAutoRegCriterion(FairseqCriterion):
                                   reduce=reduce)
         dae_loss *= num_refinements
 
-        # MT loss
+        # char MT loss
         flat_lprobs = lprobs.contiguous().view(-1, lprobs.size(-1))
         flat_target = target.contiguous().view(-1)
         assert flat_lprobs.size(0) == flat_target.size(0)
         mt_loss = F.nll_loss(flat_lprobs, flat_target, size_average=False, ignore_index=self.padding_idx,
                           reduce=reduce)
 
-        loss = mt_loss + lp_loss + dae_loss
+        # word MT loss
+        word_mt_loss = torch.sum(torch.cuda.FloatTensor([0.0]))
+        if self.composition_info:
+            flat_word_lprobs = word_lprobs.view(-1, word_lprobs.size(-1))
+            flat_word_target = word_target.view(-1)
+            assert flat_word_lprobs.size(0) == flat_word_target.size(0)
+            word_mt_loss = F.nll_loss(flat_word_lprobs, flat_word_target, size_average=False,
+                                      ignore_index=self.padding_idx, reduce=reduce)
+
+        loss = mt_loss + word_mt_loss + lp_loss + dae_loss
         sample_size = sample['target'].size(0) if self.args.sentence_avg else sample['ntokens']
         logging_output = {
             'loss': utils.item(loss.data) if reduce else loss.data,
             'mt_loss': utils.item(mt_loss.data) if reduce else mt_loss.data,
+            'word_mt_loss': utils.item(word_mt_loss.data) if reduce else word_mt_loss.data,
             'lp_loss': utils.item(lp_loss.data) if reduce else lp_loss.data,
             'dae_loss': utils.item(dae_loss.data) if reduce else dae_loss.data,
             'ntokens': sample['ntokens'],
@@ -122,6 +134,7 @@ class NonAutoRegCriterion(FairseqCriterion):
         """Aggregate logging outputs from data parallel training."""
         loss_sum = sum(log.get('loss', 0) for log in logging_outputs)
         mt_loss_sum = sum(log.get('mt_loss', 0) for log in logging_outputs)
+        word_mt_loss_sum = sum(log.get('word_mt_loss', 0) for log in logging_outputs)
         lp_loss_sum = sum(log.get('lp_loss', 0) for log in logging_outputs)
         dae_loss_sum = sum(log.get('dae_loss', 0) for log in logging_outputs)
         ntokens = sum(log.get('ntokens', 0) for log in logging_outputs)
@@ -130,6 +143,7 @@ class NonAutoRegCriterion(FairseqCriterion):
         agg_output = {
             'loss': loss_sum / sample_size / math.log(2),
             'mt_loss': mt_loss_sum / sample_size / math.log(2),
+            'word_mt_loss': word_mt_loss_sum / sample_size / math.log(2),
             'lp_loss': lp_loss_sum / sample_size / math.log(2),
             'dae_loss': dae_loss_sum / sample_size / math.log(2),
             'ntokens': ntokens,

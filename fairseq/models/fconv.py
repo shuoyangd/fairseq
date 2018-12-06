@@ -176,6 +176,7 @@ class FConvModel(FairseqModel):
                 refinement_composition=args.refinement_composition,
                 refinement_autoenc=args.refinement_autoenc,
                 length_prediction=args.length_prediction,
+                word_dictionary=task.tgt_dict_comp,
             )
         return FConvModel(encoder, decoder, generator)
 

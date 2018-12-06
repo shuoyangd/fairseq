@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from . import FairseqGenerator
+from . import FairseqGenerator, BasicFairseqGenerator
 from fairseq.modules import LearnedPositionalEmbedding, MultiheadAttention
 
 
@@ -139,9 +139,9 @@ class NonAutoRegCharGenerator(FairseqGenerator):
                  input_embed=None, always_have_fc_in=False,
                  bottleneck_layers=0, bottleneck_factor=4,
                  refinement_layers=0, tie_refinements=False,
-                 refinement_composition="cnn",
-                 refinement_autoenc=False,
+                 refinement_composition="cnn", refinement_autoenc=False,
                  length_prediction=False,
+                 word_dictionary=None,
                 ):
         """
         A basic non-autoregressive character generator, without length prediction
@@ -164,6 +164,7 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         :param bottleneck_factor:
         :param refinement_layers:
         :param tie_refinements:
+        :param word_dictionary:
         """
 
         assert len(char_dictionary) == char_embed.num_embeddings
@@ -246,6 +247,13 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         else:
             self.length_predictor = None
 
+        self.word_dictionary = word_dictionary
+        if self.word_dictionary:
+            self.word_generator = BasicFairseqGenerator(word_dictionary, fc_in_builder, fc_out_builder,
+                                                        hidden_size, hidden_size, hidden_size, dropout)
+        else:
+            self.word_generator = None
+
 
     def forward(self, x, log_probs, sample=None):
         """
@@ -273,6 +281,11 @@ class NonAutoRegCharGenerator(FairseqGenerator):
             length_lprobs = None
             max_word_len = self.max_word_len
 
+        if self.word_generator is not None:
+            word_lprobs = self.word_generator(decoder_embed, True)
+        else:
+            word_lprobs = None
+
         x = x.unsqueeze(2).expand(-1, -1, max_word_len, -1)  # (batch_size, max_seq_len, max_word_len, hidden_dim)
         pos_idx = torch.arange(max_word_len).type_as(x).long()
         pos_idx = pos_idx.unsqueeze(0).expand(batch_size, max_seq_len, -1)  # (batch_size, max_seq_len, max_word_len)
@@ -282,7 +295,8 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         if self.bottleneck:
             x = self.bottleneck(x)
 
-        x = self.interconn_layer(x)
+        # TODO: convolution as phi suggested
+        # x = self.interconn_layer(x)
 
         logits = self.fc_out(x)  # (batch_size, max_seq_len, max_word_len, num_embeddings)
 
@@ -301,8 +315,8 @@ class NonAutoRegCharGenerator(FairseqGenerator):
                         lprobs.append(lprob)
 
         lprobs.append(torch.nn.functional.log_softmax(logits, dim=-1))
-        # TODO: note that we are the only generator that returns two values -- maybe there are nicer work-around?
-        return lprobs, length_lprobs
+        # TODO: note that we are the only generator that returns three values -- maybe there are nicer work-around?
+        return lprobs, length_lprobs, word_lprobs
 
 
 class LengthPredictionGenerator(nn.Module):
