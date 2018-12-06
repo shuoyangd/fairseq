@@ -157,8 +157,15 @@ def load_ensemble_for_inference(filenames, task, model_arg_overrides=None):
 
         # build model for ensemble
         model = task.build_model(args)
+        """
         model.upgrade_state_dict(state['model'])
         model.load_state_dict(state['model'], strict=True)
+        """
+        # neglect keys that are not part of model
+        model_dict = model.state_dict()
+        serialized_dict = {k: v for k, v in state['model'].items() if k in model_dict}
+        model_dict.update(serialized_dict)
+        model.load_state_dict(model_dict, strict=True)
         ensemble.append(model)
 
     return ensemble, args

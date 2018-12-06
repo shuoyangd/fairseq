@@ -16,7 +16,7 @@ from . import data_utils, FairseqDataset
 
 def collate(
     samples, pad_idx, eos_idx, left_pad_source=True, left_pad_target=False,
-    input_feeding=True,
+    input_feeding=True, exclude_first_prev_output=False,
 ):
     if len(samples) == 0:
         return {}
@@ -71,7 +71,10 @@ def collate(
         'nsentences': samples[0]['source'].size(0),
     }
     if prev_output_tokens is not None:
-        batch['net_input']['prev_output_tokens'] = prev_output_tokens
+        if exclude_first_prev_output:
+            batch['net_input']['prev_output_tokens'] = prev_output_tokens[:, :, 1:]
+        else:
+            batch['net_input']['prev_output_tokens'] = prev_output_tokens
     return batch
 
 
@@ -107,6 +110,7 @@ class LanguagePairDataset(FairseqDataset):
         left_pad_source=True, left_pad_target=False,
         max_source_positions=1024, max_target_positions=1024,
         shuffle=True, input_feeding=True,
+        composition_info=False,
     ):
         if tgt_dict is not None:
             assert src_dict.pad() == tgt_dict.pad()
@@ -124,6 +128,7 @@ class LanguagePairDataset(FairseqDataset):
         self.max_target_positions = max_target_positions
         self.shuffle = shuffle
         self.input_feeding = input_feeding
+        self.composition_info = composition_info
 
     def __getitem__(self, index):
         return {
@@ -167,7 +172,7 @@ class LanguagePairDataset(FairseqDataset):
         return collate(
             samples, pad_idx=self.src_dict.pad(), eos_idx=self.src_dict.eos(),
             left_pad_source=self.left_pad_source, left_pad_target=self.left_pad_target,
-            input_feeding=self.input_feeding,
+            input_feeding=self.input_feeding, exclude_first_prev_output=self.composition_info,
         )
 
     def get_dummy_batch(self, num_tokens, max_positions, src_len=128, tgt_len=128, tgt_char_level=False):

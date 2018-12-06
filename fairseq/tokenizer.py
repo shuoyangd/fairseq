@@ -7,7 +7,6 @@
 
 from collections import Counter
 import os, re
-import pdb
 
 import torch
 from multiprocessing import Pool
@@ -277,8 +276,15 @@ class CharTokenizer:
                 )
         ids.fill_(dict.pad_index)
 
+        compose_offset = 0
+        if compose_dict is not None:
+            compose_offset = 1
+
         for i, word in enumerate(chars):
-            nchars = len(word)
+            if compose_dict is not None:
+                word_idx = compose_dict.index("".join(word))
+                ids[i, 0] = word_idx
+            nchars = len(word) if len(word) < max_word_len else max_word_len
             for j, char in enumerate(word):
                 if add_if_not_exist:
                     idx = dict.add_symbol(char)
@@ -286,13 +292,13 @@ class CharTokenizer:
                     idx = dict.index(char)
                 if consumer is not None:
                     consumer(char, idx)
-                ids[i, j] = idx
-            if compose_dict is not None:
-                word_idx = compose_dict.add_symbol("".join(word))
-                ids[:, -1] = word_idx
+                ids[i, j+compose_offset] = idx
             if append_eow:
-                ids[i, nchars] = dict.eow_index
+                ids[i, nchars+compose_offset] = dict.eow_index
+
         if append_eos:
-            ids[nwords, 0] = dict.eos_index
+            if compose_dict:
+                ids[nwords, 0] = dict.eos_index
+            ids[nwords, 0+compose_offset] = dict.eos_index
         return ids
 

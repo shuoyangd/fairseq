@@ -36,8 +36,8 @@ class NonAutoRegCriterion(FairseqCriterion):
         lprobs, length_lprobs, word_lprobs = model.get_normalized_probs(net_output, log_probs=True)
         target = model.get_targets(sample, net_output)
         if self.composition_info:
-            word_target = target[:, :, -1]
-            target = target[:, :, :-1]
+            word_target = target[:, :, 0]
+            target = target[:, :, 1:]
 
         # FIXME: sample
         """
@@ -109,8 +109,8 @@ class NonAutoRegCriterion(FairseqCriterion):
         # word MT loss
         word_mt_loss = torch.sum(torch.cuda.FloatTensor([0.0]))
         if self.composition_info:
-            flat_word_lprobs = word_lprobs.view(-1, word_lprobs.size(-1))
-            flat_word_target = word_target.view(-1)
+            flat_word_lprobs = word_lprobs.contiguous().view(-1, word_lprobs.size(-1))
+            flat_word_target = word_target.contiguous().view(-1)
             assert flat_word_lprobs.size(0) == flat_word_target.size(0)
             word_mt_loss = F.nll_loss(flat_word_lprobs, flat_word_target, size_average=False,
                                       ignore_index=self.padding_idx, reduce=reduce)

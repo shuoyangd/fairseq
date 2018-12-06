@@ -209,11 +209,11 @@ class NonAutoRegCharGenerator(FairseqGenerator):
         else:
             self.bottleneck = None
 
-        interconn_layer=True
-        if interconn_layer:
-            self.interconn_layer = nn.Conv1d(hidden_size + pos_embed_dim, hidden_size + pos_embed_dim, 3, padding=1)
-        else:
-            self.interconn_layer = None
+        # interconn_layer=True
+        # if interconn_layer:
+        #     self.interconn_layer = nn.Conv1d(hidden_size + pos_embed_dim, hidden_size + pos_embed_dim, 3, padding=1)
+        # else:
+        #     self.interconn_layer = None
 
         self.refinement_layers = refinement_layers
         self.tie_refinements = tie_refinements
