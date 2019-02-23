@@ -49,7 +49,7 @@ def main(options):
     alg = alg.squeeze()  # (slen, tlen)
     stoks = sline.split()
     ttoks = tline.split()
-    stoks = ["<eos>"] + stoks
+    stoks = stoks + ["<eos>"]
     ttoks = ttoks + ["<eos>"]
     _, alg = torch.max(alg, dim=1)  # (tgt_len,)
     smap, debped_stoks = debpe(stoks)

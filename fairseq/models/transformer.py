@@ -289,7 +289,8 @@ class TransformerEncoder(FairseqEncoder):
         if self.embed_positions is not None:
             x += self.embed_positions(src_tokens)
         x = F.dropout(x, p=self.dropout, training=self.training)
-        x.register_hook(SaliencyManager.compute_saliency)
+        if x.requires_grad:
+            x.register_hook(SaliencyManager.compute_saliency)
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
