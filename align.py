@@ -1,17 +1,20 @@
-#!/usr/bin/env python3 -u
-"""
-align source and target sentence with a model
-"""
+# -*- coding: utf-8 -*-
+#
+# Copyright © 2019 Shuoyang Ding <shuoyangd@gmail.com>
+# Created on 2019-02-19
+#
+# Distributed under terms of the MIT license.
 
 import numpy as np
 import pdb
+import sys
 import torch
 
 from fairseq import data, options, progress_bar, tasks, tokenizer, utils
 from fairseq.meters import StopwatchMeter, TimeMeter
 from fairseq.sequence_generator import SequenceGenerator
 from fairseq.sequence_scorer import SequenceScorer
-
+from fairseq.models.transformer import SaliencyManager
 
 def parallel_buffered_read(src_stream, tgt_stream, buffer_size):
     buffer = []
@@ -73,21 +76,19 @@ def main(args):
     saliencies = []
     attns = []
 
-    def compute_saliency(grad):
-        saliency = grad.norm(dim=-1)
-        saliencies.append(saliency / torch.sum(saliency, dim=1))
-
     def guided_hook(module, grad_in, grad_out):
         return tuple([ torch.clamp(grad, min=0.0) for grad in grad_in ])
 
     def process_batch(batch):
         net_input = batch['net_input']
+        """
         src_tokens = net_input['src_tokens']
         x = model.encoder.embed_scale * model.encoder.embed_tokens(src_tokens)
         if model.encoder.embed_positions is not None:  # TODO: test w/ or w/o positional embedding?
             x = x + model.encoder.embed_positions(src_tokens)
-        x.register_hook(compute_saliency)
+        # x.register_hook(compute_saliency)
         net_input['src_emb'] = x
+        """
 
         if args.saliency == "guided":
             for module in model.modules():
@@ -95,21 +96,7 @@ def main(args):
 
         decoder_out = model(**net_input)
         probs = model.get_normalized_probs(decoder_out, log_probs=False, sample=batch)  # (batch_size, target_len, vocab)
-        grad_outputs = torch.zeros_like(probs)
 
-        target = batch['target']
-        bsz, tlen = target.size()
-        target = target.view(bsz, tlen, 1)
-        batch_idx = torch.arange(bsz).view(bsz, -1).expand(bsz, tlen)
-        tlen_idx = torch.arange(tlen).view(-1, tlen).expand(bsz, tlen)
-        grad_outputs[batch_idx, tlen_idx, target] = 1
-        probs.backward(gradient=grad_outputs)
-        model.zero_grad()
-
-        attn = decoder_out[1]['attn']
-        return attn
-
-        """
         target = batch['target']
         bsz, tlen = target.size()
         target = target.view(bsz, tlen, 1)
@@ -117,14 +104,18 @@ def main(args):
         for i in range(bsz):
             for j in range(tlen):
                 target_probs[i, j].backward(retain_graph=True)
-                pdb.set_trace()
                 model.zero_grad()
-        """
+
+        saliency = torch.stack(SaliencyManager.single_sentence_saliency, dim=1)
+        attn = decoder_out[1]['attn']
+        SaliencyManager.clear_saliency()
+        return saliency, attn
 
     max_positions = utils.resolve_max_positions(
         task.max_positions(),
         *[model.max_positions() for model in models]
     )
+    num_batches = 0
     for inputs in parallel_buffered_read( \
             open(args.data[0] + "/" + args.source_lang), \
             open(args.data[0] + "/" + args.target_lang), \
@@ -132,11 +123,21 @@ def main(args):
         ):
         src_inputs, tgt_inputs = zip(*inputs)
         for batch in make_batches(src_inputs, tgt_inputs, args, task, max_positions):
-            pdb.set_trace()
-            attns.append(process_batch(batch))
+            saliency, attn = process_batch(batch)
+            saliencies.append(saliency)
+            attns.append(attn)
+            num_batches += 1
+            if num_batches % 10 == 0:
+                sys.stderr.write(".")
+                sys.stderr.flush()
+
+    torch.save(saliencies, open(args.out + ".sa", 'wb'))
+    torch.save(attns, open(args.out + ".at", 'wb'))
+
 
 if __name__ == '__main__':
     parser = options.get_generation_parser(True)
     parser.add_argument("--saliency", choices=["plain", "guided", "deconv"], help="")
+    parser.add_argument("--out", metavar="PATH", help="")
     args = options.parse_args_and_arch(parser)
     main(args)
