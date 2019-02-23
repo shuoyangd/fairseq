@@ -33,7 +33,7 @@ def make_batches(src_lines, tgt_lines, args, task, max_positions):
         for src_str in src_lines
     ]
     tgt_tokens = [
-        tokenizer.Tokenizer.tokenize(tgt_str, task.source_dictionary, add_if_not_exist=False).long()
+        tokenizer.Tokenizer.tokenize(tgt_str, task.target_dictionary, add_if_not_exist=False).long()
         for tgt_str in tgt_lines
     ]
 

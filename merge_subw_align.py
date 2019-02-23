@@ -30,7 +30,7 @@ def debpe(toks):
     if old_idx == 0 or tok.startswith("▁"):
         new_idx += 1
         idx_map[old_idx] = new_idx
-        new_toks.append(tok[1:])
+        new_toks.append(tok[1:] if tok.startswith("▁") else tok)
     else:
         idx_map[old_idx] = new_idx
         new_toks[new_idx] += tok
@@ -49,17 +49,21 @@ def main(options):
     alg = alg.squeeze()  # (slen, tlen)
     stoks = sline.split()
     ttoks = tline.split()
-    stoks = stoks + ["<eos>"]
-    ttoks = ttoks + ["<eos>"]
+    stoks = stoks + ["▁<eos>"]
+    ttoks = ttoks + ["▁<eos>"]
     _, alg = torch.max(alg, dim=1)  # (tgt_len,)
     smap, debped_stoks = debpe(stoks)
     tmap, debped_ttoks = debpe(ttoks)
 
-    src_out_file.write(" ".join(stoks) + "\n")
-    tgt_out_file.write(" ".join(ttoks) + "\n")
+    src_out_file.write(" ".join(debped_stoks) + "\n")
+    tgt_out_file.write(" ".join(debped_ttoks) + "\n")
     debpe_alg = []
+    old_src_len = len(stoks)
+    old_tgt_len = len(ttoks)
     for old_tgt, old_src in enumerate(alg.tolist()):
-      debpe_alg.append("{0}-{1}".format(smap[old_src], tmap[old_tgt]))
+      if old_tgt != old_tgt_len - 1 and old_src != old_src_len - 1:
+        debpe_alg.append("{0}-{1}".format(smap[old_src]+1, tmap[old_tgt]+1))
+    debpe_alg = set(debpe_alg)
     alg_out_file.write(" ".join(debpe_alg) + "\n")
 
 if __name__ == "__main__":
