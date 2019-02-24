@@ -14,7 +14,8 @@ from fairseq import data, options, progress_bar, tasks, tokenizer, utils
 from fairseq.meters import StopwatchMeter, TimeMeter
 from fairseq.sequence_generator import SequenceGenerator
 from fairseq.sequence_scorer import SequenceScorer
-from fairseq.models.transformer import SaliencyManager
+from fairseq.models import SaliencyManager
+from fairseq.models.lstm import LSTMEncoder
 
 def parallel_buffered_read(src_stream, tgt_stream, buffer_size):
     buffer = []
@@ -72,7 +73,11 @@ def main(args):
     print('| loading model(s) from {}'.format(args.path))
     models, _ = utils.load_ensemble_for_inference(args.path.split(':'), task, model_arg_overrides=eval(args.model_overrides))
     model = models[0]  # assume only one model for now
-    model.eval()  # turn off dropout
+    if type(model.encoder) == LSTMEncoder:
+        model.encoder.training = False
+        model.decoder.training = False
+    else:
+        model.eval()  # turn off dropout, will kill cudnn rnn backward
     if use_cuda:
         model.cuda()
     saliencies = []
@@ -82,7 +87,10 @@ def main(args):
         return tuple([ torch.clamp(grad, min=0.0) for grad in grad_in ])
 
     def process_batch(batch):
+        if use_cuda:
+            batch = utils.move_to_cuda(batch)
         net_input = batch['net_input']
+
         """
         src_tokens = net_input['src_tokens']
         x = model.encoder.embed_scale * model.encoder.embed_tokens(src_tokens)
@@ -109,7 +117,10 @@ def main(args):
                 model.zero_grad()
 
         saliency = torch.stack(SaliencyManager.single_sentence_saliency, dim=1)
-        attn = decoder_out[1]['attn']
+        if type(decoder_out[1]) == dict:
+            attn = decoder_out[1]['attn']
+        else:
+            attn = decoder_out[1]
         SaliencyManager.clear_saliency()
         return saliency, attn
 

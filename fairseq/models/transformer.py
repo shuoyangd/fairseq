@@ -21,21 +21,8 @@ from fairseq.modules import (
 
 from . import (
     FairseqIncrementalDecoder, FairseqEncoder, FairseqLanguageModel, FairseqModel, register_model,
-    register_model_architecture,
+    register_model_architecture, SaliencyManager
 )
-
-
-class SaliencyManager:
-    single_sentence_saliency = []
-
-    @classmethod
-    def compute_saliency(cls, grad):
-        saliency = grad.norm(dim=-1)
-        cls.single_sentence_saliency.append(saliency / torch.sum(saliency, dim=1))
-
-    @classmethod
-    def clear_saliency(cls):
-        cls.single_sentence_saliency = []
 
 
 @register_model('transformer')

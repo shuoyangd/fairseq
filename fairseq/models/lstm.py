@@ -13,7 +13,7 @@ from fairseq import options, utils
 from fairseq.modules import AdaptiveSoftmax
 from . import (
     FairseqEncoder, FairseqIncrementalDecoder, FairseqModel, register_model,
-    register_model_architecture,
+    register_model_architecture, SaliencyManager
 )
 
 
@@ -351,6 +351,8 @@ class LSTMDecoder(FairseqIncrementalDecoder):
         # embed tokens
         x = self.embed_tokens(prev_output_tokens)
         x = F.dropout(x, p=self.dropout_in, training=self.training)
+        if x.requires_grad:
+            x.register_hook(SaliencyManager.compute_saliency)
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)

@@ -19,6 +19,7 @@ from fairseq.modules import (
 from . import (
     FairseqEncoder, FairseqIncrementalDecoder, FairseqModel,
     FairseqLanguageModel, register_model, register_model_architecture,
+    SaliencyManager
 )
 
 
@@ -254,6 +255,8 @@ class FConvEncoder(FairseqEncoder):
         # embed tokens and positions
         x = self.embed_tokens(src_tokens) + self.embed_positions(src_tokens)
         x = F.dropout(x, p=self.dropout, training=self.training)
+        if x.requires_grad:
+            x.register_hook(SaliencyManager.compute_saliency)
         input_embedding = x
 
         # project to size of convolution
