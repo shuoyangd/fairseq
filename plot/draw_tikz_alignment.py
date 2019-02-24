@@ -26,7 +26,7 @@ opt_parser.add_argument("--src", metavar="PATH", required=True, help="")
 opt_parser.add_argument("--tgt", metavar="PATH", required=True, help="")
 opt_parser.add_argument("--alg", metavar="PATH", required=True, help="")
 opt_parser.add_argument("--out", metavar="PATH", default=None, help="")
-opt_parser.add_argument("--soft", type=bool, default=False, help="turn this on if your alignment is soft")
+opt_parser.add_argument("--soft", type=bool, action='store_true', default=False, help="turn this on if your alignment is soft")
 
 template="""% https://gist.github.com/tetsuok/2979324
 \\begin{{tikzpicture}}[scale=0.7]

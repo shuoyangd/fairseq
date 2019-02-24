@@ -21,6 +21,7 @@ opt_parser.add_argument("--source-lang", help="")
 opt_parser.add_argument("--target-lang", help="")
 opt_parser.add_argument("--alignment", metavar="PATH", help="")
 opt_parser.add_argument("--out", metavar="PATH", help="")
+opt_parser.add_argument("--flip", type=bool, action='store_true', default="False", help="")
 
 def debpe(toks):
   idx_map = {}
@@ -55,14 +56,17 @@ def main(options):
     smap, debped_stoks = debpe(stoks)
     tmap, debped_ttoks = debpe(ttoks)
 
-    src_out_file.write(" ".join(debped_stoks) + "\n")
-    tgt_out_file.write(" ".join(debped_ttoks) + "\n")
+    src_out_file.write(" ".join(debped_stoks[:-1]) + "\n")
+    tgt_out_file.write(" ".join(debped_ttoks[:-1]) + "\n")
     debpe_alg = []
     old_src_len = len(stoks)
     old_tgt_len = len(ttoks)
     for old_tgt, old_src in enumerate(alg.tolist()):
       if old_tgt != old_tgt_len - 1 and old_src != old_src_len - 1:
-        debpe_alg.append("{0}-{1}".format(smap[old_src]+1, tmap[old_tgt]+1))
+        if options.flip:
+          debpe_alg.append("{0}-{1}".format(smap[old_src]+1, tmap[old_tgt]+1))
+        else:
+          debpe_alg.append("{1}-{0}".format(smap[old_src]+1, tmap[old_tgt]+1))
     debpe_alg = set(debpe_alg)
     alg_out_file.write(" ".join(debpe_alg) + "\n")
 
