@@ -21,7 +21,7 @@ opt_parser.add_argument("--source-lang", help="")
 opt_parser.add_argument("--target-lang", help="")
 opt_parser.add_argument("--alignment", metavar="PATH", help="")
 opt_parser.add_argument("--out", metavar="PATH", help="")
-opt_parser.add_argument("--flip", type=bool, action='store_true', default="False", help="")
+opt_parser.add_argument("--flip", action='store_true', default=False, help="")
 
 def debpe(toks):
   idx_map = {}
@@ -40,7 +40,7 @@ def debpe(toks):
 def main(options):
   src_file = open(options.text + "/" + options.source_lang)
   tgt_file = open(options.text + "/" + options.target_lang)
-  alignments = torch.load(open(options.alignment, 'rb'))  # we are assuming bsz = 1 for this..
+  alignments = torch.load(open(options.alignment, 'rb'), map_location=lambda storage, loc: storage)  # we are assuming bsz = 1 for this..
 
   src_out_file = open(options.out + ".src", 'w')
   tgt_out_file = open(options.out + ".tgt", 'w')
