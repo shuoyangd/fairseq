@@ -73,6 +73,8 @@ def main(args):
     models, _ = utils.load_ensemble_for_inference(args.path.split(':'), task, model_arg_overrides=eval(args.model_overrides))
     model = models[0]  # assume only one model for now
     model.eval()  # turn off dropout
+    if use_cuda:
+        model.cuda()
     saliencies = []
     attns = []
 
