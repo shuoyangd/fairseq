@@ -102,7 +102,8 @@ def main(args):
 
         if args.saliency == "guided":
             for module in model.modules():
-                module.register_backward_hook(guided_hook)
+                if type(module) == torch.nn.modules.linear.Linear:
+                    module.register_backward_hook(guided_hook)
 
         decoder_out = model(**net_input)
         probs = model.get_normalized_probs(decoder_out, log_probs=False, sample=batch)  # (batch_size, target_len, vocab)
