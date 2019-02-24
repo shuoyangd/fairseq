@@ -206,6 +206,8 @@ class LSTMEncoder(FairseqEncoder):
         # embed tokens
         x = self.embed_tokens(src_tokens)
         x = F.dropout(x, p=self.dropout_in, training=self.training)
+        if x.requires_grad:
+            x.register_hook(SaliencyManager.compute_saliency)
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
@@ -351,8 +353,6 @@ class LSTMDecoder(FairseqIncrementalDecoder):
         # embed tokens
         x = self.embed_tokens(prev_output_tokens)
         x = F.dropout(x, p=self.dropout_in, training=self.training)
-        if x.requires_grad:
-            x.register_hook(SaliencyManager.compute_saliency)
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
