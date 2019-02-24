@@ -64,9 +64,9 @@ def main(options):
     for old_tgt, old_src in enumerate(alg.tolist()):
       if old_tgt != old_tgt_len - 1 and old_src != old_src_len - 1:
         if options.flip:
-          debpe_alg.append("{0}-{1}".format(smap[old_src]+1, tmap[old_tgt]+1))
-        else:
           debpe_alg.append("{1}-{0}".format(smap[old_src]+1, tmap[old_tgt]+1))
+        else:
+          debpe_alg.append("{0}-{1}".format(smap[old_src]+1, tmap[old_tgt]+1))
     debpe_alg = set(debpe_alg)
     alg_out_file.write(" ".join(debpe_alg) + "\n")
 
