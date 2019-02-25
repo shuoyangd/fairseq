@@ -15,9 +15,12 @@ class SaliencyManager:
     single_sentence_saliency = []
 
     @classmethod
-    def compute_saliency(cls, grad):
-        saliency = grad.norm(dim=-1)
-        cls.single_sentence_saliency.append(saliency / torch.sum(saliency, dim=1))
+    def compute_saliency(cls, grad, abs_saliency=False):
+        if abs_saliency:
+            grad = torch.abs(grad)
+        else:
+            grad = torch.clamp(grad, min=0.0)
+        cls.single_sentence_saliency.append(grad / torch.sum(grad, dim=1))
 
     @classmethod
     def clear_saliency(cls):
@@ -149,7 +152,7 @@ class FairseqModel(BaseFairseqModel):
         assert isinstance(self.encoder, FairseqEncoder)
         assert isinstance(self.decoder, FairseqDecoder)
 
-    def forward(self, src_tokens, src_lengths, prev_output_tokens, smoothing_factor=0.0):
+    def forward(self, src_tokens, src_lengths, prev_output_tokens, smoothing_factor=0.0, abs_saliency=False):
         """
         Run the forward pass for an encoder-decoder model.
 
@@ -170,7 +173,7 @@ class FairseqModel(BaseFairseqModel):
         Returns:
             the decoder's output, typically of shape `(batch, tgt_len, vocab)`
         """
-        encoder_out = self.encoder(src_tokens, src_lengths, smoothing_factor)
+        encoder_out = self.encoder(src_tokens, src_lengths, smoothing_factor, abs_saliency)
         decoder_out = self.decoder(prev_output_tokens, encoder_out)
         return decoder_out
 

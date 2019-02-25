@@ -9,6 +9,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pdb
 
 from fairseq import options, utils
 from fairseq.modules import (
@@ -234,7 +235,7 @@ class FConvEncoder(FairseqEncoder):
             layer_in_channels.append(out_channels)
         self.fc2 = Linear(in_channels, embed_dim)
 
-    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0):
+    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0, abs_saliency=False):
         """
         Args:
             src_tokens (LongTensor): tokens in the source language of shape
@@ -253,13 +254,20 @@ class FConvEncoder(FairseqEncoder):
                   padding elements of shape `(batch, src_len)`
         """
         # embed tokens and positions
-        x = self.embed_tokens(src_tokens) + self.embed_positions(src_tokens)
+        sel = torch.ones_like(src_tokens).float()
+        sel.requires_grad = True
+        sel.register_hook(lambda grad: SaliencyManager.compute_saliency(grad, abs_saliency))
+
+        x = self.embed_tokens(src_tokens)
+        xp = x.permute(2, 0, 1)
+        xp = xp * sel
+        x = xp.permute(1, 2, 0)
         if smoothing_factor > 0.0:
-            x += torch.normal(torch.zeros_like(x), \
+            x = x + torch.normal(torch.zeros_like(x), \
                     torch.ones_like(x) * smoothing_factor / (torch.max(x) - torch.min(x)))
+
+        x = x + self.embed_positions(src_tokens)
         x = F.dropout(x, p=self.dropout, training=self.training)
-        if x.requires_grad:
-            x.register_hook(SaliencyManager.compute_saliency)
         input_embedding = x
 
         # project to size of convolution

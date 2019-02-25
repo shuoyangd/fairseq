@@ -256,7 +256,7 @@ class TransformerEncoder(FairseqEncoder):
         if self.normalize:
            self.layer_norm = LayerNorm(embed_dim)
 
-    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0):
+    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0, abs_saliency=False):
         """
         Args:
             src_tokens (LongTensor): tokens in the source language of shape
@@ -272,15 +272,21 @@ class TransformerEncoder(FairseqEncoder):
                   padding elements of shape `(batch, src_len)`
         """
         # embed tokens and positions
+        sel = torch.ones_like(src_tokens).float()
+        sel.requires_grad = True
+        sel.register_hook(lambda grad: SaliencyManager.compute_saliency(grad, abs_saliency))
+
         x = self.embed_scale * self.embed_tokens(src_tokens)
-        if self.embed_positions is not None:
-            x += self.embed_positions(src_tokens)
+        xp = x.permute(2, 0, 1)
+        xp = xp * sel
+        x = xp.permute(1, 2, 0)
         if smoothing_factor > 0.0:
             x = x + torch.normal(torch.zeros_like(x), \
                     torch.ones_like(x) * smoothing_factor / (torch.max(x) - torch.min(x)))
+
+        if self.embed_positions is not None:
+            x += self.embed_positions(src_tokens)
         x = F.dropout(x, p=self.dropout, training=self.training)
-        if x.requires_grad:
-            x.register_hook(SaliencyManager.compute_saliency)
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)

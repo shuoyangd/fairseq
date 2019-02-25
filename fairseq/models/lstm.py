@@ -192,7 +192,7 @@ class LSTMEncoder(FairseqEncoder):
             self.output_units *= 2
 
 
-    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0):
+    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0, abs_saliency=False):
         if self.left_pad:
             # convert left-padding to right-padding
             src_tokens = utils.convert_padding_direction(
@@ -203,14 +203,19 @@ class LSTMEncoder(FairseqEncoder):
 
         bsz, seqlen = src_tokens.size()
 
+        sel = torch.ones_like(src_tokens).float()
+        sel.requires_grad = True
+        sel.register_hook(lambda grad: SaliencyManager.compute_saliency(grad, abs_saliency))
+
         # embed tokens
         x = self.embed_tokens(src_tokens)
+        xp = x.permute(2, 0, 1)
+        xp = xp * sel
+        x = xp.permute(1, 2, 0)
         if smoothing_factor > 0.0:
-            x += torch.normal(torch.zeros_like(x), \
+            x = x + torch.normal(torch.zeros_like(x), \
                     torch.ones_like(x) * smoothing_factor / (torch.max(x) - torch.min(x)))
         x = F.dropout(x, p=self.dropout_in, training=self.training)
-        if x.requires_grad:
-            x.register_hook(SaliencyManager.compute_saliency)
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)

@@ -91,6 +91,8 @@ def main(args):
             batch = utils.move_to_cuda(batch)
         net_input = batch['net_input']
         net_input['smoothing_factor'] = args.smoothing_factor
+        if args.abs:
+            net_input['abs_saliency'] = True
 
         """
         src_tokens = net_input['src_tokens']
@@ -143,6 +145,7 @@ def main(args):
         ):
         src_inputs, tgt_inputs = zip(*inputs)
         for batch in make_batches(src_inputs, tgt_inputs, args, task, max_positions):
+            pdb.set_trace()
             saliency, attn = process_batch(batch)
             saliencies.append(saliency)
             attns.append(attn)
@@ -161,5 +164,6 @@ if __name__ == '__main__':
     parser.add_argument("--out", metavar="PATH", help="")
     parser.add_argument("--smoothing-factor", "-sf", type=float, default=0.0, help="")
     parser.add_argument("--n-samples", "-sn", type=int, default=1, help="")
+    parser.add_argument("--abs", action='store_true', default=False, help="")
     args = options.parse_args_and_arch(parser)
     main(args)
