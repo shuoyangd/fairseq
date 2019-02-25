@@ -90,6 +90,7 @@ def main(args):
         if use_cuda:
             batch = utils.move_to_cuda(batch)
         net_input = batch['net_input']
+        net_input['smoothing_factor'] = args.smoothing_factor
 
         """
         src_tokens = net_input['src_tokens']
@@ -105,19 +106,24 @@ def main(args):
                 if type(module) == torch.nn.modules.linear.Linear:
                     module.register_backward_hook(guided_hook)
 
-        decoder_out = model(**net_input)
-        probs = model.get_normalized_probs(decoder_out, log_probs=False, sample=batch)  # (batch_size, target_len, vocab)
-
         target = batch['target']
         bsz, tlen = target.size()
         target = target.view(bsz, tlen, 1)
-        target_probs = torch.gather(probs, -1, target).view(bsz, tlen)  # (batch_size * target_len)
-        for i in range(bsz):
-            for j in range(tlen):
-                target_probs[i, j].backward(retain_graph=True)
-                model.zero_grad()
 
-        saliency = torch.stack(SaliencyManager.single_sentence_saliency, dim=1)
+        for sample_i in range(args.n_samples):
+            decoder_out = model(**net_input)
+            probs = model.get_normalized_probs(decoder_out, log_probs=False, sample=batch)  # (batch_size, target_len, vocab)
+            target_probs = torch.gather(probs, -1, target).view(bsz, tlen)  # (batch_size * target_len)
+            for i in range(bsz):
+                for j in range(tlen):
+                    target_probs[i, j].backward(retain_graph=True)
+                    model.zero_grad()
+
+        # single sentence saliency will be a list with (tgt * n_samples) of (bsz, src)
+        saliency = torch.stack(SaliencyManager.single_sentence_saliency, dim=1)  # (bsz, tgt * n_samples, src)
+        bsz = saliency.size(0)
+        saliency = saliency.view(bsz, args.n_samples, tlen, -1)  # (bsz, n_samples, tgt, src)
+        saliency = torch.mean(saliency, dim=1)  # (bsz, tgt, src)
         if type(decoder_out[1]) == dict:
             attn = decoder_out[1]['attn']
         else:
@@ -153,5 +159,7 @@ if __name__ == '__main__':
     parser = options.get_generation_parser(True)
     parser.add_argument("--saliency", choices=["plain", "guided", "deconv"], help="")
     parser.add_argument("--out", metavar="PATH", help="")
+    parser.add_argument("--smoothing-factor", "-sf", type=float, default=0.0, help="")
+    parser.add_argument("--n-samples", "-sn", type=int, default=1, help="")
     args = options.parse_args_and_arch(parser)
     main(args)

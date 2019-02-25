@@ -149,7 +149,7 @@ class FairseqModel(BaseFairseqModel):
         assert isinstance(self.encoder, FairseqEncoder)
         assert isinstance(self.decoder, FairseqDecoder)
 
-    def forward(self, src_tokens, src_lengths, prev_output_tokens):
+    def forward(self, src_tokens, src_lengths, prev_output_tokens, smoothing_factor=0.0):
         """
         Run the forward pass for an encoder-decoder model.
 
@@ -170,7 +170,7 @@ class FairseqModel(BaseFairseqModel):
         Returns:
             the decoder's output, typically of shape `(batch, tgt_len, vocab)`
         """
-        encoder_out = self.encoder(src_tokens, src_lengths)
+        encoder_out = self.encoder(src_tokens, src_lengths, smoothing_factor)
         decoder_out = self.decoder(prev_output_tokens, encoder_out)
         return decoder_out
 

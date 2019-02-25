@@ -234,7 +234,7 @@ class FConvEncoder(FairseqEncoder):
             layer_in_channels.append(out_channels)
         self.fc2 = Linear(in_channels, embed_dim)
 
-    def forward(self, src_tokens, src_lengths):
+    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0):
         """
         Args:
             src_tokens (LongTensor): tokens in the source language of shape
@@ -254,6 +254,9 @@ class FConvEncoder(FairseqEncoder):
         """
         # embed tokens and positions
         x = self.embed_tokens(src_tokens) + self.embed_positions(src_tokens)
+        if smoothing_factor > 0.0:
+            x += torch.normal(torch.zeros_like(x), \
+                    torch.ones_like(x) * smoothing_factor / (torch.max(x) - torch.min(x)))
         x = F.dropout(x, p=self.dropout, training=self.training)
         if x.requires_grad:
             x.register_hook(SaliencyManager.compute_saliency)

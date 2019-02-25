@@ -256,7 +256,7 @@ class TransformerEncoder(FairseqEncoder):
         if self.normalize:
            self.layer_norm = LayerNorm(embed_dim)
 
-    def forward(self, src_tokens, src_lengths):
+    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0):
         """
         Args:
             src_tokens (LongTensor): tokens in the source language of shape
@@ -275,6 +275,9 @@ class TransformerEncoder(FairseqEncoder):
         x = self.embed_scale * self.embed_tokens(src_tokens)
         if self.embed_positions is not None:
             x += self.embed_positions(src_tokens)
+        if smoothing_factor > 0.0:
+            x = x + torch.normal(torch.zeros_like(x), \
+                    torch.ones_like(x) * smoothing_factor / (torch.max(x) - torch.min(x)))
         x = F.dropout(x, p=self.dropout, training=self.training)
         if x.requires_grad:
             x.register_hook(SaliencyManager.compute_saliency)
