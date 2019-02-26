@@ -145,7 +145,6 @@ def main(args):
         ):
         src_inputs, tgt_inputs = zip(*inputs)
         for batch in make_batches(src_inputs, tgt_inputs, args, task, max_positions):
-            pdb.set_trace()
             saliency, attn = process_batch(batch)
             saliencies.append(saliency)
             attns.append(attn)
