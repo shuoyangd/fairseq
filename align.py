@@ -17,6 +17,37 @@ from fairseq.sequence_scorer import SequenceScorer
 from fairseq.models import SaliencyManager
 from fairseq.models.lstm import LSTMEncoder
 
+class NLForwardValueManager:
+    forward_switch = True
+    nl_forward_values = []
+    buf = []
+
+    @classmethod
+    def switch_forword(cls):
+        if not cls.forward_switch:
+            cls.buf = []
+            cls.nl_forward_values = []
+            cls.forward_switch = True
+
+    @classmethod
+    def switch_backward(cls):
+        if cls.forward_switch:
+            cls.buf = cls.nl_forward_values.copy()
+            cls.forward_switch = False
+
+    @classmethod
+    def append_value(cls, val):
+        cls.nl_forward_values.append(val)
+
+    @classmethod
+    def pop_value(cls):
+        val = cls.buf[-1]
+        del cls.buf[-1]
+        if len(cls.buf) == 0:
+            cls.buf = cls.nl_forward_values.copy()
+        return val
+
+
 def parallel_buffered_read(src_stream, tgt_stream, buffer_size):
     buffer = []
     for src_str, tgt_str in zip(src_stream, tgt_stream):
@@ -83,8 +114,34 @@ def main(args):
     saliencies = []
     attns = []
 
+    def retain_nl_forward(module, input, output):
+        assert(len(input) == 1)
+        NLForwardValueManager.switch_forword()
+        NLForwardValueManager.append_value(input[0])
+
+
     def guided_hook(module, grad_in, grad_out):
-        return tuple([ torch.clamp(grad, min=0.0) for grad in grad_in ])
+        """
+        If input & output has the same shape, use both to mask
+        otherwise, only mask w/ the input
+        """
+        assert(len(grad_in) == 1)
+        assert(len(grad_out) == 1)
+
+        grad_in = grad_in[0]
+        grad_out = grad_out[0]
+
+        NLForwardValueManager.switch_backward()
+        forward_value = NLForwardValueManager.pop_value()
+        fw_mask = torch.zeros_like(forward_value)
+        fw_mask[forward_value > 0] = 1
+        grad_in = grad_in * fw_mask
+        if grad_in.size() == grad_out.size():
+            bw_mask = torch.zeros_like(grad_out)
+            bw_mask[grad_out > 0] = 1
+            grad_in = grad_in * bw_mask
+        return (grad_in,)
+
 
     def process_batch(batch):
         if use_cuda:
@@ -105,7 +162,8 @@ def main(args):
 
         if args.saliency == "guided":
             for module in model.modules():
-                if type(module) == torch.nn.modules.linear.Linear:
+                if type(module) == torch.nn.ReLU or type(module) == torch.nn.GLU:
+                    module.register_forward_hook(retain_nl_forward)
                     module.register_backward_hook(guided_hook)
 
         target = batch['target']

@@ -193,6 +193,7 @@ class FConvEncoder(FairseqEncoder):
         self.dropout = dropout
         self.left_pad = left_pad
         self.num_attention_layers = None
+        self.glu = nn.GLU(dim=2)
 
         num_embeddings = len(dictionary)
         self.padding_idx = dictionary.pad()
@@ -264,7 +265,7 @@ class FConvEncoder(FairseqEncoder):
         x = xp.permute(1, 2, 0)
         if smoothing_factor > 0.0:
             x = x + torch.normal(torch.zeros_like(x), \
-                    torch.ones_like(x) * smoothing_factor / (torch.max(x) - torch.min(x)))
+                    torch.ones_like(x) * smoothing_factor * (torch.max(x) - torch.min(x)))
 
         x = x + self.embed_positions(src_tokens)
         x = F.dropout(x, p=self.dropout, training=self.training)
@@ -302,7 +303,7 @@ class FConvEncoder(FairseqEncoder):
                 padding_r = conv.kernel_size[0] // 2
                 x = F.pad(x, (0, 0, 0, 0, padding_l, padding_r))
                 x = conv(x)
-            x = F.glu(x, dim=2)
+            x = self.glu(x)
 
             if residual is not None:
                 x = (x + residual) * math.sqrt(0.5)
@@ -412,6 +413,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
         self.dropout = dropout
         self.left_pad = left_pad
         self.need_attn = True
+        self.glu = nn.GLU(dim=2)
 
         convolutions = extend_conv_spec(convolutions)
         in_channels = convolutions[0][0]
@@ -519,7 +521,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
 
             x = F.dropout(x, p=self.dropout, training=self.training)
             x = conv(x, incremental_state)
-            x = F.glu(x, dim=2)
+            x = self.glu(x)
 
             # attention
             if attention is not None:

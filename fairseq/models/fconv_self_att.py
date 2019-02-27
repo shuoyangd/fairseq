@@ -144,6 +144,7 @@ class FConvEncoder(FairseqEncoder):
         self.dropout = dropout
         self.num_attention_layers = None
         self.left_pad = left_pad
+        self.glu = nn.GLU()
 
         num_embeddings = len(dictionary)
         self.padding_idx = dictionary.pad()
@@ -205,7 +206,7 @@ class FConvEncoder(FairseqEncoder):
             padding_r = conv.kernel_size[0] // 2
             x = F.pad(x, (0, 0, 0, 0, padding_l, padding_r))
             x = conv(x)
-            x = F.glu(x, dim=2)
+            x = self.glu(x, dim=2)
             if attention is not None:
                 x = attention(x)
             x = (x + residual) * math.sqrt(0.5)
@@ -261,6 +262,7 @@ class FConvDecoder(FairseqDecoder):
         self.left_pad = left_pad
         self.need_attn = True
         in_channels = convolutions[0][0]
+        self.glu = nn.GLU()
 
         def expand_bool_array(val):
             if isinstance(val, bool):
@@ -382,7 +384,7 @@ class FConvDecoder(FairseqDecoder):
 
             x = F.dropout(x, p=self.dropout, training=self.training)
             x = conv(x)
-            x = F.glu(x, dim=2)
+            x = self.glu(x, dim=2)
 
             # attention
             if attention is not None:

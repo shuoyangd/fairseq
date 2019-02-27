@@ -214,7 +214,7 @@ class LSTMEncoder(FairseqEncoder):
         x = xp.permute(1, 2, 0)
         if smoothing_factor > 0.0:
             x = x + torch.normal(torch.zeros_like(x), \
-                    torch.ones_like(x) * smoothing_factor / (torch.max(x) - torch.min(x)))
+                    torch.ones_like(x) * smoothing_factor * (torch.max(x) - torch.min(x)))
         x = F.dropout(x, p=self.dropout_in, training=self.training)
 
         # B x T x C -> T x B x C

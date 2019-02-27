@@ -282,7 +282,7 @@ class TransformerEncoder(FairseqEncoder):
         x = xp.permute(1, 2, 0)
         if smoothing_factor > 0.0:
             x = x + torch.normal(torch.zeros_like(x), \
-                    torch.ones_like(x) * smoothing_factor / (torch.max(x) - torch.min(x)))
+                    torch.ones_like(x) * smoothing_factor * (torch.max(x) - torch.min(x)))
 
         if self.embed_positions is not None:
             x += self.embed_positions(src_tokens)
@@ -556,6 +556,7 @@ class TransformerEncoderLayer(nn.Module):
         self.fc1 = Linear(self.embed_dim, args.encoder_ffn_embed_dim)
         self.fc2 = Linear(args.encoder_ffn_embed_dim, self.embed_dim)
         self.layer_norms = nn.ModuleList([LayerNorm(self.embed_dim) for i in range(2)])
+        self.relu = nn.ReLU()
 
     def forward(self, x, encoder_padding_mask):
         """
@@ -576,7 +577,7 @@ class TransformerEncoderLayer(nn.Module):
 
         residual = x
         x = self.maybe_layer_norm(1, x, before=True)
-        x = F.relu(self.fc1(x))
+        x = self.relu(self.fc1(x))
         x = F.dropout(x, p=self.relu_dropout, training=self.training)
         x = self.fc2(x)
         x = F.dropout(x, p=self.dropout, training=self.training)
@@ -619,6 +620,7 @@ class TransformerDecoderLayer(nn.Module):
         self.dropout = args.dropout
         self.relu_dropout = args.relu_dropout
         self.normalize_before = args.decoder_normalize_before
+        self.relu = nn.ReLU()
 
         self.self_attn_layer_norm = LayerNorm(self.embed_dim)
 
@@ -701,7 +703,7 @@ class TransformerDecoderLayer(nn.Module):
 
         residual = x
         x = self.maybe_layer_norm(self.final_layer_norm, x, before=True)
-        x = F.relu(self.fc1(x))
+        x = self.relu()(self.fc1(x))
         x = F.dropout(x, p=self.relu_dropout, training=self.training)
         x = self.fc2(x)
         x = F.dropout(x, p=self.dropout, training=self.training)
