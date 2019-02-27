@@ -8,6 +8,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pdb
 
 from . import FairseqDecoder, FairseqEncoder
 
@@ -20,7 +21,7 @@ class SaliencyManager:
             grad = torch.abs(grad)
         else:
             grad = torch.clamp(grad, min=0.0)
-        cls.single_sentence_saliency.append(grad / torch.sum(grad, dim=1))
+        cls.single_sentence_saliency.append(grad / torch.sum(grad, dim=1).unsqueeze(1))
 
     @classmethod
     def clear_saliency(cls):
