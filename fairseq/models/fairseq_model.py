@@ -18,9 +18,9 @@ class SaliencyManager:
     @classmethod
     def compute_saliency(cls, grad, abs_saliency=False):
         if abs_saliency:
-            grad = torch.abs(grad)
+            grad = torch.abs(grad).detach().cpu()
         else:
-            grad = torch.clamp(grad, min=0.0)
+            grad = torch.clamp(grad, min=0.0).detach().cpu()
         cls.single_sentence_saliency.append(grad / torch.sum(grad, dim=1).unsqueeze(1))
 
     @classmethod

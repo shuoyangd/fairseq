@@ -126,7 +126,6 @@ def main(args):
         NLForwardValueManager.switch_forword()
         NLForwardValueManager.append_value(input[0])
 
-
     def guided_hook(module, grad_in, grad_out):
 
         assert(len(grad_in) == 1)
@@ -148,6 +147,11 @@ def main(args):
         grad_in = grad_in * (fw_mask_p * bw_mask_p + fw_mask_n * bw_mask_n)
         return (grad_in,)
 
+    if args.saliency == "guided":
+        for module in model.modules():
+            if type(module) == torch.nn.ReLU or type(module) == torch.nn.GLU:
+                module.register_forward_hook(retain_nl_forward)
+                module.register_backward_hook(guided_hook)
 
     def process_batch(batch):
         if use_cuda:
@@ -161,12 +165,6 @@ def main(args):
         net_input['smoothing_factor'] = args.smoothing_factor
         if args.abs:
             net_input['abs_saliency'] = True
-
-        if args.saliency == "guided":
-            for module in model.modules():
-                if type(module) == torch.nn.ReLU or type(module) == torch.nn.GLU:
-                    module.register_forward_hook(retain_nl_forward)
-                    module.register_backward_hook(guided_hook)
 
         target = batch['target']
         bsz, tlen = target.size()
@@ -192,8 +190,8 @@ def main(args):
             attn = decoder_out[1]
         SaliencyManager.clear_saliency()
 
-        saliency = saliency.cpu()
-        attn = attn.cpu()
+        saliency = saliency.detach().cpu()
+        attn = attn.detach().cpu()
         return saliency, attn
 
     max_positions = utils.resolve_max_positions(
