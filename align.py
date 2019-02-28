@@ -128,10 +128,7 @@ def main(args):
 
 
     def guided_hook(module, grad_in, grad_out):
-        """
-        If input & output has the same shape, use both to mask
-        otherwise, only mask w/ the input
-        """
+
         assert(len(grad_in) == 1)
         assert(len(grad_out) == 1)
 
@@ -140,13 +137,15 @@ def main(args):
 
         NLForwardValueManager.switch_backward()
         forward_value = NLForwardValueManager.pop_value()
-        fw_mask = torch.zeros_like(forward_value)
-        fw_mask[forward_value > 0] = 1
-        grad_in = grad_in * fw_mask
-        if grad_in.size() == grad_out.size():
-            bw_mask = torch.zeros_like(grad_out)
-            bw_mask[grad_out > 0] = 1
-            grad_in = grad_in * bw_mask
+        fw_mask_p = torch.zeros_like(forward_value)
+        fw_mask_p[forward_value > 0] = 1
+        fw_mask_n = torch.zeros_like(forward_value)
+        fw_mask_n[forward_value < 0] = 1
+        bw_mask_p = torch.zeros_like(grad_in)
+        bw_mask_p[grad_in > 0] = 1
+        bw_mask_n = torch.zeros_like(grad_in)
+        bw_mask_n[grad_in < 0] = 1
+        grad_in = grad_in * (fw_mask_p * bw_mask_p + fw_mask_n * bw_mask_n)
         return (grad_in,)
 
 
@@ -162,15 +161,6 @@ def main(args):
         net_input['smoothing_factor'] = args.smoothing_factor
         if args.abs:
             net_input['abs_saliency'] = True
-
-        """
-        src_tokens = net_input['src_tokens']
-        x = model.encoder.embed_scale * model.encoder.embed_tokens(src_tokens)
-        if model.encoder.embed_positions is not None:  # TODO: test w/ or w/o positional embedding?
-            x = x + model.encoder.embed_positions(src_tokens)
-        # x.register_hook(compute_saliency)
-        net_input['src_emb'] = x
-        """
 
         if args.saliency == "guided":
             for module in model.modules():
@@ -189,7 +179,7 @@ def main(args):
         target_probs = torch.mean(target_probs, dim=1)
         for i in range(bsz):
             for j in range(tlen):
-                target_probs[i, j].backward(retain_graph=True)
+                target_probs[i, j].backward()
                 model.zero_grad()
 
         # single sentence saliency will be a list with (tgt * n_samples) of (bsz, src)
@@ -201,6 +191,9 @@ def main(args):
         else:
             attn = decoder_out[1]
         SaliencyManager.clear_saliency()
+
+        saliency = saliency.cpu()
+        attn = attn.cpu()
         return saliency, attn
 
     max_positions = utils.resolve_max_positions(
