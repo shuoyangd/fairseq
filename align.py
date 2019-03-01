@@ -177,7 +177,7 @@ def main(args):
         target_probs = torch.mean(target_probs, dim=1)
         for i in range(bsz):
             for j in range(tlen):
-                target_probs[i, j].backward()
+                target_probs[i, j].backward(retain_graph=True)
                 model.zero_grad()
 
         # single sentence saliency will be a list with (tgt * n_samples) of (bsz, src)
