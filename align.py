@@ -172,7 +172,8 @@ def main(args):
 
         decoder_out = model(**net_input)
         # sample argument is only used for adaptive softmax, so don't worry about it
-        probs = model.get_normalized_probs(decoder_out, log_probs=False, sample=None)  # (batch_size * n_samples, target_len, vocab)
+        # we don't want nll, all the setting is to maximize objective
+        probs = model.get_normalized_probs(decoder_out, log_probs=True, sample=None)  # (batch_size * n_samples, target_len, vocab)
         target_probs = torch.gather(probs, -1, target).view(bsz, args.n_samples, tlen)  # (batch_size, n_samples, target_len)
         target_probs = torch.mean(target_probs, dim=1)
         for i in range(bsz):

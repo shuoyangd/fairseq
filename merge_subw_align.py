@@ -21,6 +21,7 @@ opt_parser.add_argument("--source-lang", help="")
 opt_parser.add_argument("--target-lang", help="")
 opt_parser.add_argument("--alignment", metavar="PATH", help="")
 opt_parser.add_argument("--out", metavar="PATH", help="")
+opt_parser.add_argument("--dont-add-one", action='store_true', default=False, help="")
 opt_parser.add_argument("--flip", action='store_true', default=False, help="")
 
 def debpe(toks):
@@ -41,6 +42,8 @@ def main(options):
   src_file = open(options.text + "/" + options.source_lang)
   tgt_file = open(options.text + "/" + options.target_lang)
   alignments = torch.load(open(options.alignment, 'rb'), map_location=lambda storage, loc: storage)  # we are assuming bsz = 1 for this..
+  if alignments[0].size(0) != 1:
+      alignments = [ torch.mean(alignment, dim=0).unsqueeze(0) for alignment in alignments ]
 
   src_out_file = open(options.out + ".src", 'w')
   tgt_out_file = open(options.out + ".tgt", 'w')
@@ -63,10 +66,16 @@ def main(options):
     old_tgt_len = len(ttoks)
     for old_tgt, old_src in enumerate(alg.tolist()):
       if old_tgt != old_tgt_len - 1 and old_src != old_src_len - 1:
-        if options.flip:
-          debpe_alg.append("{1}-{0}".format(smap[old_src]+1, tmap[old_tgt]+1))
+        if options.dont_add_one:
+          if options.flip:
+            debpe_alg.append("{1}-{0}".format(smap[old_src], tmap[old_tgt]))
+          else:
+            debpe_alg.append("{0}-{1}".format(smap[old_src], tmap[old_tgt]))
         else:
-          debpe_alg.append("{0}-{1}".format(smap[old_src]+1, tmap[old_tgt]+1))
+          if options.flip:
+            debpe_alg.append("{1}-{0}".format(smap[old_src]+1, tmap[old_tgt]+1))
+          else:
+            debpe_alg.append("{0}-{1}".format(smap[old_src]+1, tmap[old_tgt]+1))
     debpe_alg = set(debpe_alg)
     alg_out_file.write(" ".join(debpe_alg) + "\n")
 

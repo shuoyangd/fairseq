@@ -7,6 +7,7 @@
 
 import argparse
 import logging
+import numpy as np
 import sys
 
 logging.basicConfig(
@@ -50,7 +51,14 @@ def escape_tikz_reserves(s):
   s = s.replace(".", "{.}")
   s = s.replace("-", "{-}")
   s = s.replace("+", "{+}")
+  s = s.replace("▁", "\_")
   return s
+
+def nan_guard(number, slen):
+  if np.isnan(number):
+    return 1 / slen
+  else:
+    return number
 
 def main(options):
   src_file = open(options.src)
@@ -64,6 +72,7 @@ def main(options):
     if not options.soft:
       apairs = [ tuple(tok.split('-')) for tok in aline.strip().split() ]
     else:
+      aline = aline.replace("nan", "float('nan')")
       aw = eval(aline.strip())
 
     fields = []
@@ -84,7 +93,10 @@ def main(options):
       plot_vertex=""
       for i in range(len(stoks)):
         for j in range(len(ttoks)):
-            plot_vertex += "  \\node[rectangle,fill=black!{0}!white,draw=black!{1}!white,minimum size=0.6cm,line width=2] at ({2}+.5, {3}) {{}};\n".format(aw[i][j] * 75, aw[i][j] * 75, i, len(stoks)+0.5-j)
+            plot_vertex += "  \\node[rectangle,fill=black!{0}!white,draw=black!{1}!white,minimum size=0.6cm,line width=2] at ({3}, {2}) {{}};\n".format(\
+                nan_guard(aw[j][i] * 150, len(stoks)), \
+                nan_guard(aw[j][i] * 150, len(stoks)), \
+                len(stoks)-0.5-i, j+0.5)
     fields.append(plot_vertex)  # {4}
 
     if options.out:
