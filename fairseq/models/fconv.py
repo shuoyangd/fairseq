@@ -235,7 +235,7 @@ class FConvEncoder(FairseqEncoder):
             layer_in_channels.append(out_channels)
         self.fc2 = Linear(in_channels, embed_dim)
 
-    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0, abs_saliency=False):
+    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0, abs_saliency=False, alpha=None):
         """
         Args:
             src_tokens (LongTensor): tokens in the source language of shape
@@ -260,7 +260,10 @@ class FConvEncoder(FairseqEncoder):
 
         x = self.embed_tokens(src_tokens)
         xp = x.permute(2, 0, 1)
-        xp = xp * sel
+        if alpha is None:
+            xp = xp * sel
+        else:
+            xp = xp * sel * alpha.unsqueeze(1)
         x = xp.permute(1, 2, 0)
         if smoothing_factor > 0.0:
             x = x + torch.normal(torch.zeros_like(x), \

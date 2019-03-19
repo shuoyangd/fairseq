@@ -153,6 +153,13 @@ def main(args):
                 module.register_forward_hook(retain_nl_forward)
                 module.register_backward_hook(guided_hook)
 
+    # TODO: eliminate white baseline for the moment
+    # used only when saliency == "integral"
+    # background = torch.mean(model.encoder.embed_tokens.weights, dim=0)  # (emb_dim,)
+    # if args.baseline == "b":
+    #     background = background * 0.0
+    # model.encoder.background = background
+
     def process_batch(batch):
         if use_cuda:
             batch = utils.move_to_cuda(batch)
@@ -161,10 +168,21 @@ def main(args):
             orig_size = batch['net_input'][key].size()
             orig_size = list(orig_size)
             new_size = tuple([orig_size[0] * args.n_samples] + orig_size[1:])
-            net_input[key] = batch['net_input'][key].expand(*new_size)
+            net_input[key] = batch['net_input'][key].expand(*new_size)  # TODO: this will not work for batch_size != 1
         net_input['smoothing_factor'] = args.smoothing_factor
+
         if args.abs:
             net_input['abs_saliency'] = True
+
+        # TODO: assuming batch_size = 1 for this if
+        # clean up later
+        if args.saliency == "integral":
+            alpha = torch.pow(torch.arange(0, 1, 1 / args.n_samples) + 1 / args.n_samples, 2)  # (0, 1] rather than [0, 1)
+            batch_size = batch['net_input']['src_tokens'].size(0)
+            alpha = alpha.unsqueeze(0).expand(batch_size, args.n_samples)
+            alpha = alpha.view(batch_size * args.n_samples, -1).squeeze()  # TODO: make sure alpha and the batched input aligns
+            alpha = alpha.cuda() if use_cuda else alpha
+            net_input['alpha'] = alpha  # (batch_size * n_samples)
 
         target = batch['target']
         bsz, tlen = target.size()
@@ -172,10 +190,13 @@ def main(args):
 
         decoder_out = model(**net_input)
         # sample argument is only used for adaptive softmax, so don't worry about it
-        # we don't want nll, all the setting is to maximize objective
+        # we don't want *negative* log likelihood -- all the setting is to maximize objective
         probs = model.get_normalized_probs(decoder_out, log_probs=True, sample=None)  # (batch_size * n_samples, target_len, vocab)
         target_probs = torch.gather(probs, -1, target).view(bsz, args.n_samples, tlen)  # (batch_size, n_samples, target_len)
-        target_probs = torch.mean(target_probs, dim=1)
+        # this mean is taken mainly for speed reason
+        # otherwise, we would have to iterate through n_samples as well, which is not necessary
+        # as gradient will be 0 for prediction score that does not correspond to the input sample
+        target_probs = torch.mean(target_probs, dim=1)  # (batch_size, target_len)
         for i in range(bsz):
             for j in range(tlen):
                 target_probs[i, j].backward(retain_graph=True)
@@ -185,6 +206,8 @@ def main(args):
         saliency = torch.stack(SaliencyManager.single_sentence_saliency, dim=1)  # (bsz * n_samples, tgt, src)
         saliency = saliency.view(bsz, args.n_samples, tlen, -1)  # (bsz, n_samples, tgt, src)
         saliency = torch.mean(saliency, dim=1)  # (bsz, tgt, src)
+        # we don't need to multiply the  x - x' term for integrated because it's always 1
+
         if type(decoder_out[1]) == dict:
             attn = decoder_out[1]['attn']
         else:
@@ -221,10 +244,11 @@ def main(args):
 
 if __name__ == '__main__':
     parser = options.get_generation_parser(True)
-    parser.add_argument("--saliency", choices=["plain", "guided", "deconv"], help="")
+    parser.add_argument("--saliency", choices=["plain", "guided", "integral"], help="")
     parser.add_argument("--out", metavar="PATH", help="")
     parser.add_argument("--smoothing-factor", "-sf", type=float, default=0.0, help="")
     parser.add_argument("--n-samples", "-sn", type=int, default=1, help="")
     parser.add_argument("--abs", action='store_true', default=False, help="")
+    parser.add_argument("--baseline", "-bl", choices=["b", "w"], help="black or white baseline")
     args = options.parse_args_and_arch(parser)
     main(args)
