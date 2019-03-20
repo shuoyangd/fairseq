@@ -274,7 +274,7 @@ class TransformerEncoder(FairseqEncoder):
         # embed tokens and positions
         sel = torch.ones_like(src_tokens).float()
         sel.requires_grad = True
-        sel.register_hook(lambda grad: SaliencyManager.compute_saliency(grad, abs_saliency))
+        sel.register_hook(lambda grad: SaliencyManager.extend_saliency(grad, abs_saliency))
 
         x = self.embed_scale * self.embed_tokens(src_tokens)
         xp = x.permute(2, 0, 1)
@@ -445,7 +445,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         # embed tokens and positions
         sel = torch.ones_like(prev_output_tokens).float()
         sel.requires_grad = True
-        sel.register_hook(lambda grad: SaliencyManager.extend_saliency(grad, abs_saliency))
+        sel.register_hook(lambda grad: SaliencyManager.compute_saliency(grad, abs_saliency))
 
         x = self.embed_scale * self.embed_tokens(prev_output_tokens)
         xp = x.permute(2, 0, 1)

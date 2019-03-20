@@ -8,7 +8,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pdb
 
 from . import FairseqDecoder, FairseqEncoder
 
@@ -21,7 +20,7 @@ class SaliencyManager:
             grad = torch.abs(grad).detach().cpu()
         else:
             grad = torch.clamp(grad, min=0.0).detach().cpu()
-        cls.single_sentence_saliency.append(grad / torch.sum(grad, dim=1).unsqueeze(1))  # (bsz * n_samples, tgt, src)
+        cls.single_sentence_saliency.append(grad / torch.sum(grad, dim=1).unsqueeze(1))
 
     @classmethod
     def extend_saliency(cls, grad, abs_saliency=False):
@@ -30,7 +29,7 @@ class SaliencyManager:
         else:
             grad = torch.clamp(grad, min=0.0).detach().cpu()
         last_grad = cls.single_sentence_saliency[-1]
-        last_grad = torch.cat([last_grad, grad.unsqueeze(1)], dim=2)
+        last_grad = torch.cat([last_grad, grad], dim=1)
         cls.single_sentence_saliency[-1] = last_grad
 
     @classmethod
@@ -185,7 +184,7 @@ class FairseqModel(BaseFairseqModel):
             the decoder's output, typically of shape `(batch, tgt_len, vocab)`
         """
         encoder_out = self.encoder(src_tokens, src_lengths, smoothing_factor, abs_saliency, alpha)
-        decoder_out = self.decoder(prev_output_tokens, encoder_out, smoothing_factor, abs_saliency, alpha)
+        decoder_out = self.decoder(prev_output_tokens, encoder_out, smoothing_factor=smoothing_factor, abs_saliency=abs_saliency, alpha=alpha)
         return decoder_out
 
     def max_positions(self):
