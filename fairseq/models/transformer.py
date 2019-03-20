@@ -414,7 +414,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         if self.normalize:
            self.layer_norm = LayerNorm(embed_dim)
 
-    def forward(self, prev_output_tokens, encoder_out=None, incremental_state=None):
+    def forward(self, prev_output_tokens, encoder_out=None, incremental_state=None, smoothing_factor=0.0, abs_saliency=False, alpha=None):
         """
         Args:
             prev_output_tokens (LongTensor): previous decoder outputs of shape
@@ -443,7 +443,20 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 positions = positions[:, -1:]
 
         # embed tokens and positions
+        sel = torch.ones_like(prev_output_tokens).float()
+        sel.requires_grad = True
+        sel.register_hook(lambda grad: SaliencyManager.extend_saliency(grad, abs_saliency))
+
         x = self.embed_scale * self.embed_tokens(prev_output_tokens)
+        xp = x.permute(2, 0, 1)
+        if alpha is None:
+            xp = xp * sel
+        else:
+            xp = xp * sel * alpha.unsqueeze(1)
+        x = xp.permute(1, 2, 0)
+        if smoothing_factor > 0.0:
+            x = x + torch.normal(torch.zeros_like(x), \
+                    torch.ones_like(x) * smoothing_factor * (torch.max(x) - torch.min(x)))
 
         if self.project_in_dim is not None:
             x = self.project_in_dim(x)
