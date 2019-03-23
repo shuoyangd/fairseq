@@ -256,7 +256,7 @@ class FConvEncoder(FairseqEncoder):
         # embed tokens and positions
         sel = torch.ones_like(src_tokens).float()
         sel.requires_grad = True
-        sel.register_hook(lambda grad: SaliencyManager.compute_saliency(grad, abs_saliency))
+        sel.register_hook(lambda grad: SaliencyManager.extend_saliency(grad, abs_saliency))
 
         x = self.embed_tokens(src_tokens)
         xp = x.permute(2, 0, 1)
@@ -481,7 +481,7 @@ class FConvDecoder(FairseqIncrementalDecoder):
             else:
                 self.fc3 = Linear(out_embed_dim, num_embeddings, dropout=dropout)
 
-    def forward(self, prev_output_tokens, encoder_out_dict=None, incremental_state=None):
+    def forward(self, prev_output_tokens, encoder_out_dict=None, incremental_state=None, smoothing_factor=0.0, abs_saliency=False, alpha=None):
         if encoder_out_dict is not None:
             encoder_out = encoder_out_dict['encoder_out']
             encoder_padding_mask = encoder_out_dict['encoder_padding_mask']
@@ -496,7 +496,22 @@ class FConvDecoder(FairseqIncrementalDecoder):
 
         if incremental_state is not None:
             prev_output_tokens = prev_output_tokens[:, -1:]
+
+        # embed tokens and positions
+        sel = torch.ones_like(prev_output_tokens).float()
+        sel.requires_grad = True
+        sel.register_hook(lambda grad: SaliencyManager.compute_saliency(grad, abs_saliency))
         x = self._embed_tokens(prev_output_tokens, incremental_state)
+
+        xp = x.permute(2, 0, 1)
+        if alpha is None:
+            xp = xp * sel
+        else:
+            xp = xp * sel * alpha.unsqueeze(1)
+        x = xp.permute(1, 2, 0)
+        if smoothing_factor > 0.0:
+            x = x + torch.normal(torch.zeros_like(x), \
+                    torch.ones_like(x) * smoothing_factor * (torch.max(x) - torch.min(x)))
 
         # embed tokens and combine with positional embeddings
         x += pos_embed

@@ -205,7 +205,7 @@ class LSTMEncoder(FairseqEncoder):
 
         sel = torch.ones_like(src_tokens).float()
         sel.requires_grad = True
-        sel.register_hook(lambda grad: SaliencyManager.compute_saliency(grad, abs_saliency))
+        sel.register_hook(lambda grad: SaliencyManager.extend_saliency(grad, abs_saliency))
 
         # embed tokens
         x = self.embed_tokens(src_tokens)
@@ -349,7 +349,7 @@ class LSTMDecoder(FairseqIncrementalDecoder):
             self.fc_out = Linear(out_embed_dim, num_embeddings, dropout=dropout_out)
 
 
-    def forward(self, prev_output_tokens, encoder_out_dict, incremental_state=None):
+    def forward(self, prev_output_tokens, encoder_out_dict, incremental_state=None, smoothing_factor=0.0, abs_saliency=False, alpha=None):
         encoder_out = encoder_out_dict['encoder_out']
         encoder_padding_mask = encoder_out_dict['encoder_padding_mask']
 
@@ -362,7 +362,21 @@ class LSTMDecoder(FairseqIncrementalDecoder):
         srclen = encoder_outs.size(0)
 
         # embed tokens
+        sel = torch.ones_like(prev_output_tokens).float()
+        sel.requires_grad = True
+        sel.register_hook(lambda grad: SaliencyManager.compute_saliency(grad, abs_saliency))
+
         x = self.embed_tokens(prev_output_tokens)
+        xp = x.permute(2, 0, 1)
+        if alpha is None:
+            xp = xp * sel
+        else:
+            xp = xp * sel * alpha.unsqueeze(1)
+        x = xp.permute(1, 2, 0)
+        if smoothing_factor > 0.0:
+            x = x + torch.normal(torch.zeros_like(x), \
+                    torch.ones_like(x) * smoothing_factor * (torch.max(x) - torch.min(x)))
+
         x = F.dropout(x, p=self.dropout_in, training=self.training)
 
         # B x T x C -> T x B x C

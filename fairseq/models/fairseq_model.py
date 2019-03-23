@@ -5,6 +5,8 @@
 # the root directory of this source tree. An additional grant of patent rights
 # can be found in the PATENTS file in the same directory.
 
+import pdb
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,7 +22,7 @@ class SaliencyManager:
             grad = torch.abs(grad).detach().cpu()
         else:
             grad = torch.clamp(grad, min=0.0).detach().cpu()
-        cls.single_sentence_saliency.append(grad / torch.sum(grad, dim=1).unsqueeze(1))
+        cls.single_sentence_saliency.append(grad[:, 1:])  # first token is bos, which we don't care
 
     @classmethod
     def extend_saliency(cls, grad, abs_saliency=False):
@@ -29,8 +31,9 @@ class SaliencyManager:
         else:
             grad = torch.clamp(grad, min=0.0).detach().cpu()
         last_grad = cls.single_sentence_saliency[-1]
-        last_grad = torch.cat([last_grad, grad], dim=1)
-        cls.single_sentence_saliency[-1] = last_grad
+        last_grad = torch.cat([grad, last_grad], dim=1)  # we do care about eos though, as it's a separate input token
+        # cls.single_sentence_saliency[-1] = last_grad
+        cls.single_sentence_saliency[-1] = last_grad / torch.sum(last_grad, dim=1).unsqueeze(1)
 
     @classmethod
     def clear_saliency(cls):
