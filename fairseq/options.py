@@ -284,6 +284,8 @@ def add_optimization_args(parser):
     # fmt: off
     group.add_argument('--max-epoch', '--me', default=0, type=int, metavar='N',
                        help='force stop training at specified epoch')
+    group.add_argument('--max-no-improvement-count', default=3, type=int, metavar='N',
+                       help='maximum number of epochs without improvement on dev before the training stop (default=3)')
     group.add_argument('--max-update', '--mu', default=0, type=int, metavar='N',
                        help='force stop training at specified update')
     group.add_argument('--clip-norm', default=25, type=float, metavar='NORM',

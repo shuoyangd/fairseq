@@ -99,14 +99,24 @@ def main(args, init_distributed=False):
     lr = trainer.get_lr()
     train_meter = StopwatchMeter()
     train_meter.start()
+    no_improvement_count = 0
+    prev_sum_valid_losses = float('inf')
     valid_losses = [None]
     valid_subsets = args.valid_subset.split(',')
-    while lr > args.min_lr and epoch_itr.epoch < max_epoch and trainer.get_num_updates() < max_update:
+    while no_improvement_count < args.max_no_improvement_count and \
+            lr > args.min_lr and epoch_itr.epoch < max_epoch and trainer.get_num_updates() < max_update:
         # train for one epoch
         train(args, trainer, task, epoch_itr)
 
         if epoch_itr.epoch % args.validate_interval == 0:
             valid_losses = validate(args, trainer, task, epoch_itr, valid_subsets)
+            sum_valid_losses = sum(valid_losses)
+            if sum_valid_losses < prev_sum_valid_losses:
+                prev_sum_valid_losses = sum_valid_losses
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+                print('Dev loss not improving for ', no_improvement_count, " epochs")
 
         # only use first validation loss to update the learning rate
         lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])

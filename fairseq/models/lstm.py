@@ -523,6 +523,38 @@ def base_architecture(args):
     args.adaptive_softmax_cutoff = getattr(args, 'adaptive_softmax_cutoff', '10000,50000,200000')
 
 
+@register_model_architecture('lstm', 'lstm_shallow_iwslt_de_en')
+def lstm_shallow_iwslt_de_en(args):
+    args.dropout = getattr(args, 'dropout', 0.1)
+    args.encoder_layers = getattr(args, 'encoder_layers', 2)
+    args.encoder_bidirectional = getattr(args, 'encoder_bidirectional', True)
+    args.encoder_embed_dim = getattr(args, 'encoder_embed_dim', 384)
+    args.encoder_dropout_in = getattr(args, 'encoder_dropout_in', 0)
+    args.encoder_dropout_out = getattr(args, 'encoder_dropout_out', 0)
+    args.decoder_layers = getattr(args, 'decoder_layers', 2)
+    args.decoder_embed_dim = getattr(args, 'decoder_embed_dim', 384)
+    args.decoder_out_embed_dim = getattr(args, 'decoder_out_embed_dim', 384)
+    args.decoder_dropout_in = getattr(args, 'decoder_dropout_in', 0)
+    args.decoder_dropout_out = getattr(args, 'decoder_dropout_out', args.dropout)
+    base_architecture(args)
+
+
+@register_model_architecture('lstm', 'lstm_deep_iwslt_de_en')
+def lstm_deep_iwslt_de_en(args):
+    args.dropout = getattr(args, 'dropout', 0.1)
+    args.encoder_layers = getattr(args, 'encoder_layers', 6)
+    args.encoder_bidirectional = getattr(args, 'encoder_bidirectional', True)
+    args.encoder_embed_dim = getattr(args, 'encoder_embed_dim', 384)
+    args.encoder_dropout_in = getattr(args, 'encoder_dropout_in', 0)
+    args.encoder_dropout_out = getattr(args, 'encoder_dropout_out', 0)
+    args.decoder_layers = getattr(args, 'decoder_layers', 6)
+    args.decoder_embed_dim = getattr(args, 'decoder_embed_dim', 384)
+    args.decoder_out_embed_dim = getattr(args, 'decoder_out_embed_dim', 384)
+    args.decoder_dropout_in = getattr(args, 'decoder_dropout_in', 0)
+    args.decoder_dropout_out = getattr(args, 'decoder_dropout_out', args.dropout)
+    base_architecture(args)
+
+
 @register_model_architecture('lstm', 'lstm_wiseman_iwslt_de_en')
 def lstm_wiseman_iwslt_de_en(args):
     args.dropout = getattr(args, 'dropout', 0.1)
