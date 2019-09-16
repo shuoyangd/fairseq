@@ -7,6 +7,7 @@
 
 import operator
 import functools
+import pdb
 
 import torch
 import torch.nn.functional as F
@@ -195,14 +196,17 @@ class AdaptiveSoftmax(nn.Module):
             end = self.cutoff[i + 1]
 
             if target_idxs is None:
-                tail_out = log_probs[:, start:end]
-                tail_out.copy_(self.tail[i](input))
-                log_probs[:, start:end] = self.lsm(tail_out).add_(tail_priors[:, i, None])
+                # the master branch head will introduce some in-place operations and hence
+                # will not work with backprop, this updated version will work
+                # tail_out = log_probs[:, start:end]
+                # tail_out.copy_(self.tail[i](input))
+                tail_out = self.tail[i](input)
+                log_probs[:, start:end] = self.lsm(tail_out).add(tail_priors[:, i, None])
             elif target_idxs[i] is not None:
                 idxs = target_idxs[i]
                 tail_out = log_probs[idxs, start:end]
                 tail_out.copy_(self.tail[i](input[idxs]))
-                log_probs[idxs, start:end] = self.lsm(tail_out).add_(tail_priors[idxs, i, None])
+                log_probs[idxs, start:end] = self.lsm(tail_out).add(tail_priors[idxs, i, None])
 
         log_probs = log_probs.view(bsz, length, -1)
         return log_probs

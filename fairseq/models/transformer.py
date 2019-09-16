@@ -479,6 +479,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             x = self.project_in_dim(x)
 
         if positions is not None:
+            if x.size(0) > positions.size(0):
+                positions = positions.repeat(x.size(0) // positions.size(0), 1, 1)
             x += positions
         x = F.dropout(x, p=self.dropout, training=self.training)
 
