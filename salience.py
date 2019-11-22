@@ -39,6 +39,8 @@ class SalienceType(Enum):
 
 class SalienceManager:
   single_sentence_salience = []  # each element in this list corresponds to one target word of shape (bsz * samples, src_len)
+  single_target_token_salience_buffer = []  # only for li* salience on adaptive embedding
+  single_sentence_adaptive_masks = []  # only for li* salience on adaptive embedding
   __bsz = 1
   __n_samples = None
 
@@ -53,9 +55,19 @@ class SalienceManager:
 
   @classmethod
   def compute_li_et_al_saliency(cls, grad):
-    pdb.set_trace()
     grad = torch.mean(torch.abs(grad), dim=-1).detach()
     cls.single_sentence_salience.append(grad / torch.sum(grad, dim=0).unsqueeze(1))
+
+  @classmethod
+  def compute_li_et_al_saliency_for_adaptive(cls, grad):
+    grad = torch.mean(torch.abs(grad), dim=-1).detach()
+    cls.single_target_token_salience_buffer.append(grad)
+    if len(cls.single_target_token_salience_buffer) == len(cls.single_sentence_adaptive_masks):
+      final_salience = torch.Tensor(cls.single_sentence_adaptive_masks[0].size()).type_as(grad)
+      for salience, mask in zip(cls.single_target_token_salience_buffer, reversed(cls.single_sentence_adaptive_masks)):
+        final_salience[mask] = salience
+      cls.single_sentence_salience.append(final_salience)
+      cls.single_target_token_salience_buffer = []
 
   @classmethod
   def extend_salience(cls, grad):
@@ -112,15 +124,15 @@ class SalienceManager:
       model.zero_grad()
 
   @classmethod
-  def backward_fairseq_with_salience_single_timestep(cls, probs, target, model):
+  def backward_fairseq_with_salience_single_timestep(cls, probs, target, model, sequential=False):
     """
     probs: (bsz * n_samples, vocab_size) output probability distribution of a single time step with regard to a input sentence
     target: (bsz,) target word corresponding to a single time step, to evaluate salience score on
     """
     cls.__bsz = target.size()[0]
-    if model.decoder.embed_tokens.salience_type == SalienceType.smoothed:
+    if model.decoder.embed_tokens.salience_type == SalienceType.smoothed and not sequential:
         cls.__n_samples = model.decoder.embed_tokens.smooth_samples
-    elif model.decoder.embed_tokens.salience_type == SalienceType.integral:
+    elif model.decoder.embed_tokens.salience_type == SalienceType.integral and not sequential:
         cls.__n_samples = model.decoder.embed_tokens.integral_steps
     else:
         cls.__n_samples = 1
@@ -142,8 +154,8 @@ class SalienceManager:
   @classmethod
   def average_single_timestep(cls, batch_first=False):
     # the second dimension is of size bsz because we did averaging before backprop
-    stacked_salience = torch.stack(cls.single_sentence_salience, dim=1)  # (src_len, bsz, bsz * n_samples)
-    stacked_salience = torch.sum(stacked_salience, dim=1)  # (src_len, bsz * n_samples)
+    stacked_salience = torch.stack(cls.single_sentence_salience, dim=1)  # might be (src_len, bsz, bsz * n_samples) or (bsz * n_samples, src_len, bsz) depending on batch_first
+    stacked_salience = torch.sum(stacked_salience, dim=1)  # might be (src_len, bsz * n_samples) or (bsz * n_samples, src_len)
     if batch_first:
       bsz_samples, src_len = stacked_salience.size()
       stacked_salience = stacked_salience.view(cls.__bsz, cls.__n_samples, src_len)
@@ -158,6 +170,11 @@ class SalienceManager:
   def clear_salience(cls):
     cls.single_sentence_salience = []
 
+  @classmethod
+  def clear_mask(cls):
+    cls.single_sentence_adaptive_masks = []
+
+
 class SalienceEmbedding(nn.Embedding):
 
   def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
@@ -165,6 +182,7 @@ class SalienceEmbedding(nn.Embedding):
                sparse=False, _weight=None,
                salience_type=None,
                smooth_factor=0.15, smooth_samples=30,  # for smoothgrad
+               # integral_steps=100):
                integral_steps=100):
     """
     Has all the usual functionality of the normal word embedding class in PyTorch

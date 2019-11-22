@@ -112,11 +112,12 @@ def evaluate(prefix_data, tag_data, subjs_data, model, outdir, cuda=False):
     verb_probs = torch.gather(probs, 0, final_prefix_index).squeeze(0)  # (bsz * n_samples, vocab_size)
 
     SalienceManager.backward_fairseq_with_salience_single_timestep(verb_probs, tag_batch[0, :], model)
-    averaged_salience_verum = SalienceManager.average_single_timestep(batch_first=True)  # (src_len, bsz)
+    averaged_salience_verum = SalienceManager.average_single_timestep(batch_first=True)  # (bsz, src_len)
     SalienceManager.clear_salience()
     SalienceManager.backward_fairseq_with_salience_single_timestep(verb_probs, 1 - tag_batch[0], model)
-    averaged_salience_malum = SalienceManager.average_single_timestep(batch_first=True)  # (src_len, bsz)
+    averaged_salience_malum = SalienceManager.average_single_timestep(batch_first=True)  # (bsz, src_len)
     SalienceManager.clear_salience()
+    SalienceManager.clear_mask()
 
     verum_salience_output.write(str(averaged_salience_verum.squeeze().tolist()) + "\n")
     malum_salience_output.write(str(averaged_salience_malum.squeeze().tolist()) + "\n")
@@ -187,7 +188,7 @@ def main(parsed_args):
 
   import_user_module(parsed_args)
   print(parsed_args)
-  use_cuda = torch.cuda.is_available() and not parsed_args.cpu
+  use_cuda = torch.cuda.is_available() and parsed_args.cuda
   task = tasks.setup_task(parsed_args)
 
   # load model
@@ -199,10 +200,12 @@ def main(parsed_args):
   # model = model[0]
   if use_cuda:
     model = model.cuda()
+  else:
+    model.decoder.embed_positions.cpu()
 
   # wrap embedding so it can compute saliency
   model.decoder.embed_tokens = AdaptiveInputWithSalience(model.decoder.embed_tokens)
-  # disable gradient computation
+  # disable dropout
   model.eval()
   # enable gradient computation for embedding with salience
   model.decoder.embed_tokens.activate(eval("SalienceType." + parsed_args.salience_type))

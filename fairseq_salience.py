@@ -22,8 +22,7 @@ class AdaptiveInputWithSalience(nn.Module):
   """
 
   def __init__(self, adaptive_input, salience_type=None,
-               smooth_factor=0.15, smooth_samples=30,  # for smoothgrad
-               integral_steps=100):
+               smooth_factor=0.15, smooth_samples=30, integral_steps=50):
 
     super().__init__()
     self.embedding = adaptive_input
@@ -31,10 +30,11 @@ class AdaptiveInputWithSalience(nn.Module):
     self.smooth_factor = smooth_factor
     self.smooth_samples = smooth_samples
     self.integral_steps = integral_steps
+    self.sequential_alpha = 1.0
     self.activated = False
 
 
-  def activate(self, salience_type):
+  def activate(self, salience_type, sequential=False):
     """
     Salience should not be computed for all evaluations, like validation during training.
     In these cases, SalienceEmbedding should act the same way as normal word embedding.
@@ -42,10 +42,18 @@ class AdaptiveInputWithSalience(nn.Module):
     """
     self.activated = True
     self.salience_type = salience_type
+    self.sequential = sequential
 
 
   def deactivate(self):
     self.activated = False
+
+
+  def set_sequential_alpha(self, alpha):
+    if not self.sequential:
+      raise Exception("cannot set sequential alpha when salience embedding is not sequential")
+    else:
+      self.sequential_alpha = alpha
 
 
   def adaptive_lookup(self, input):
@@ -105,30 +113,40 @@ class AdaptiveInputWithSalience(nn.Module):
       orig_size = list(input.size())
       new_size = orig_size
       new_size_expand = None
-      if self.salience_type == SalienceType.smoothed:
+      # shape expansion for smoothgrad
+      if self.salience_type == SalienceType.smoothed and not self.sequential:
         new_size_expand = tuple([ orig_size[0], orig_size[1], self.smooth_samples ] + orig_size[2:]) \
                             if not batch_first \
                             else tuple([ orig_size[0], self.smooth_samples ] + orig_size[1:])
 
-      elif self.salience_type == SalienceType.integral:
+      # shape expansion for integrated gradients
+      elif self.salience_type == SalienceType.integral and not self.sequential:
         new_size_expand = tuple([ orig_size[0], orig_size[1], self.integral_steps ] + orig_size[2:]) \
                             if not batch_first \
                             else tuple([ orig_size[0], self.integral_steps ] + orig_size[1:])
 
+      # got the shape, do the actual expansion
+      # if batch_first
       if new_size_expand and not batch_first:
         new_size = tuple([new_size_expand[0], new_size_expand[1] * new_size_expand[2]] + list(new_size_expand[3:]))
         input = input.unsqueeze(2).expand(*new_size_expand).contiguous().view(*new_size)
+      # if batch_second
       elif new_size_expand:
         new_size = tuple([new_size_expand[0] * new_size_expand[1]] + list(new_size_expand[2:]))
         input = input.unsqueeze(1).expand(*new_size_expand).contiguous().view(*new_size)
 
     # normal embedding query
     embs, masks = self.adaptive_lookup(input)
-    sel = torch.ones_like(input).float()
-    sel.requires_grad = True
-    sel.register_hook(lambda grad: SalienceManager.compute_salience(grad))
 
     if self.salience_type and self.activated:
+      sel = torch.ones_like(input).float()
+      sel.requires_grad = True
+      if self.salience_type is not None and \
+          self.salience_type != SalienceType.li and \
+          self.salience_type != SalienceType.li_smoothed:
+        sel.register_hook(lambda grad: SalienceManager.compute_salience(grad))
+      SalienceManager.single_sentence_adaptive_masks = list(filter(lambda m: m.any(), masks))
+
       # iterate through the bins
       for i in range(len(self.embedding.cutoff)):
         x = embs[i]  # embedding queried with this bin, flattened
@@ -142,16 +160,23 @@ class AdaptiveInputWithSalience(nn.Module):
 
         if not (self.salience_type == SalienceType.li or \
               self.salience_type == SalienceType.li_smoothed):
-          if self.salience_type == SalienceType.integral:
+          # integrated gradients
+          if self.salience_type == SalienceType.integral and not self.sequential:
             alpha = torch.arange(0, 1, 1 / self.integral_steps) + 1 / self.integral_steps  # (0, 1] rather than [0, 1)
-            alpha = alpha.unsqueeze(0).expand(torch.sum(mask[0]), self.integral_steps).contiguous().view(-1)  # make its shape on first dimension the same as x (the flattened embedding)
+            num_integrated_items = int((torch.sum(mask) / self.integral_steps).item())
+            alpha = alpha.unsqueeze(0).expand(num_integrated_items, self.integral_steps).contiguous().view(-1)  # make its shape on first dimension the same as x (the flattened embedding)
             alpha = alpha.type_as(x)
             x = (x * masked_sel.unsqueeze(1) * alpha.unsqueeze(1)) if batch_first else (x * masked_sel * alpha)
+          elif self.sequential:
+            x = (x * masked_sel.unsqueeze(1) * self.sequential_alpha) if batch_first else (x * masked_sel * self.sequential_alpha)
+          # vanilla
           else:
             x = (x * masked_sel.unsqueeze(1)) if batch_first else (x * masked_sel)
+        # li saliency
         else:
-            raise NotImplementedError
+            x.register_hook(lambda grad: SalienceManager.compute_li_et_al_saliency_for_adaptive(grad))
 
+        # smoothgrad
         if (self.salience_type == SalienceType.smoothed or \
               self.salience_type == SalienceType.li_smoothed) and \
               self.smooth_factor > 0.0:

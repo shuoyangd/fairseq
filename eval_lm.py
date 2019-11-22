@@ -89,6 +89,7 @@ def main(parsed_args):
         if args.fp16:
             model.half()
         if use_cuda:
+            torch.cuda.set_device(0)
             model.cuda()
 
     assert len(models) > 0

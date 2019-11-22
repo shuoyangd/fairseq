@@ -19,7 +19,7 @@ from fairseq import options, progress_bar, tasks, utils
 from fairseq.utils import import_user_module
 from fairseq.models.transformer import Linear
 
-from utils import batchify2, batchify3
+from utils import batchify2
 from salience import SalienceManager
 from salience import SalienceType
 
@@ -126,7 +126,7 @@ def validate(prefix_data, tag_data, model, cuda=False):
 
 
 def main(parsed_args):
-  torch.cuda.set_device(1)  # TODO: temporary
+  torch.cuda.set_device(0)  # TODO: temporary
 
   import_user_module(parsed_args)
   print(parsed_args)

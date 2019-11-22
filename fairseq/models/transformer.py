@@ -6,6 +6,7 @@
 # can be found in the PATENTS file in the same directory.
 
 import math
+import pdb
 
 import torch
 import torch.nn as nn
@@ -833,6 +834,74 @@ def transformer_lm_wiki103(args):
     args.attention_dropout = getattr(args, 'attention_dropout', 0.1)
     args.relu_dropout = getattr(args, 'relu_dropout', 0.1)
     transformer_lm_big(args)
+
+
+@register_model_architecture('transformer_lm', 'transformer_lm_wiki103_small')
+def transformer_lm_wiki103_small(args):
+    args.decoder_embed_dim = getattr(args, 'decoder_embed_dim', 512)
+    args.decoder_ffn_embed_dim = getattr(args, 'decoder_ffn_embed_dim', 1024)
+    args.decoder_layers = getattr(args, 'decoder_layers', 4)
+    args.decoder_attention_heads = getattr(args, 'decoder_attention_heads', 8)
+    args.dropout = getattr(args, 'dropout', 0.3)
+    args.adaptive_input = getattr(args, 'adaptive_input', True)
+    args.tie_adaptive_weights = getattr(args, 'tie_adaptive_weights', True)
+    args.adaptive_input_cutoff = getattr(args, 'adaptive_input_cutoff', '20000,60000')
+    args.adaptive_softmax_cutoff = getattr(args, 'adaptive_softmax_cutoff', '20000,60000')
+    args.adaptive_softmax_dropout = getattr(args, 'adaptive_softmax_dropout', 0.2)
+    args.attention_dropout = getattr(args, 'attention_dropout', 0.1)
+    args.relu_dropout = getattr(args, 'relu_dropout', 0.1)
+    transformer_lm_big(args)
+
+
+@register_model_architecture('transformer_lm', 'transformer_lm_wiki103_small_singlehead')
+def transformer_lm_wiki103_small_singlehead(args):
+    args.decoder_embed_dim = getattr(args, 'decoder_embed_dim', 512)
+    args.decoder_ffn_embed_dim = getattr(args, 'decoder_ffn_embed_dim', 1024)
+    args.decoder_layers = getattr(args, 'decoder_layers', 4)
+    args.decoder_attention_heads = getattr(args, 'decoder_attention_heads', 1)
+    args.dropout = getattr(args, 'dropout', 0.3)
+    args.adaptive_input = getattr(args, 'adaptive_input', True)
+    args.tie_adaptive_weights = getattr(args, 'tie_adaptive_weights', True)
+    args.adaptive_input_cutoff = getattr(args, 'adaptive_input_cutoff', '20000,60000')
+    args.adaptive_softmax_cutoff = getattr(args, 'adaptive_softmax_cutoff', '20000,60000')
+    args.adaptive_softmax_dropout = getattr(args, 'adaptive_softmax_dropout', 0.2)
+    args.attention_dropout = getattr(args, 'attention_dropout', 0.1)
+    args.relu_dropout = getattr(args, 'relu_dropout', 0.1)
+    transformer_lm_big(args)
+
+
+@register_model_architecture('transformer_lm', 'transformer_lm_wiki2')
+def transformer_lm_wiki2(args):
+    args.decoder_embed_dim = getattr(args, 'decoder_embed_dim', 512)
+    args.decoder_ffn_embed_dim = getattr(args, 'decoder_ffn_embed_dim', 1024)
+    args.decoder_layers = getattr(args, 'decoder_layers', 4)
+    args.decoder_attention_heads = getattr(args, 'decoder_attention_heads', 8)
+    args.dropout = getattr(args, 'dropout', 0.5)
+    args.adaptive_input = getattr(args, 'adaptive_input', True)
+    args.tie_adaptive_weights = getattr(args, 'tie_adaptive_weights', True)
+    args.adaptive_input_cutoff = getattr(args, 'adaptive_input_cutoff', '5000,15000')
+    args.adaptive_softmax_cutoff = getattr(args, 'adaptive_softmax_cutoff', '5000,15000')
+    args.adaptive_softmax_dropout = getattr(args, 'adaptive_softmax_dropout', 0.5)
+    args.attention_dropout = getattr(args, 'attention_dropout', 0.5)
+    args.relu_dropout = getattr(args, 'relu_dropout', 0.5)
+    base_lm_architecture(args)
+
+
+@register_model_architecture('transformer_lm', 'transformer_lm_wiki2_2layers')
+def transformer_lm_wiki2_2layers(args):
+    args.decoder_embed_dim = getattr(args, 'decoder_embed_dim', 512)
+    args.decoder_ffn_embed_dim = getattr(args, 'decoder_ffn_embed_dim', 1024)
+    args.decoder_layers = getattr(args, 'decoder_layers', 2)
+    args.decoder_attention_heads = getattr(args, 'decoder_attention_heads', 4)
+    args.dropout = getattr(args, 'dropout', 0.5)
+    args.adaptive_input = getattr(args, 'adaptive_input', True)
+    args.tie_adaptive_weights = getattr(args, 'tie_adaptive_weights', True)
+    args.adaptive_input_cutoff = getattr(args, 'adaptive_input_cutoff', '5000,15000')
+    args.adaptive_softmax_cutoff = getattr(args, 'adaptive_softmax_cutoff', '5000,15000')
+    args.adaptive_softmax_dropout = getattr(args, 'adaptive_softmax_dropout', 0.5)
+    args.attention_dropout = getattr(args, 'attention_dropout', 0.5)
+    args.relu_dropout = getattr(args, 'relu_dropout', 0.5)
+    base_lm_architecture(args)
 
 
 @register_model_architecture('transformer_lm', 'transformer_lm_gbw')

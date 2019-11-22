@@ -8,6 +8,7 @@
 
 import torch
 import os
+import pdb
 
 
 def read_subjs_data(filename):
@@ -24,6 +25,22 @@ def read_tags(tag_file_path):
     for line in f:
       tags.append([int(line.strip())])
   return torch.Tensor(tags)
+
+
+def read_subjs_data_set(filename):
+  subjs_file = open(filename)
+  subjs = []
+  attrs = []
+  for line in subjs_file:
+    fields = line.strip().split(" ||| ")
+    subjs_in_line = torch.IntTensor(eval(fields[0]))
+    attrs_in_line = torch.IntTensor(eval(fields[1]))
+    if attrs_in_line.size(0) == 0:
+      pdb.set_trace()
+    subjs.append(subjs_in_line)
+    attrs.append(attrs_in_line)
+
+  return subjs, attrs
 
 
 class SentCorpus(object):
