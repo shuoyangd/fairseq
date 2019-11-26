@@ -333,7 +333,9 @@ def make_positions(tensor, padding_idx, left_pad, onnx_trace=False):
     if make_positions.range_buf.numel() < max_pos:
         torch.arange(padding_idx + 1, max_pos, out=make_positions.range_buf)
     mask = tensor.ne(padding_idx)
+    mask = mask.to(tensor.get_device())
     positions = make_positions.range_buf[:tensor.size(1)].expand_as(tensor)
+    positions = positions.to(tensor.get_device())
     if left_pad:
         positions = positions - mask.size(1) + mask.long().sum(dim=1).unsqueeze(1)
     return tensor.clone().masked_scatter_(mask, positions[mask])

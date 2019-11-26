@@ -8,6 +8,7 @@
 import argparse
 import data
 import logging
+import os.path
 import pdb
 import torch
 import torch.nn.functional as F
@@ -155,10 +156,10 @@ def main(parsed_args):
   else:
     optimizer = eval("torch.optim." + parsed_args.finetune_optimizer)(filter(lambda param: param.requires_grad, model.decoder.parameters()), lr=parsed_args.finetune_learning_rate)
 
-  prefix_corpus_train = data.SentCorpus(parsed_args.data_prefix + "train.prefx.txt", task.source_dictionary, append_eos=False)
-  tag_corpus_train = data.read_tags(parsed_args.data_prefix + "train.tag.txt")
-  prefix_corpus_dev = data.SentCorpus(parsed_args.data_prefix + "valid.prefx.txt", task.source_dictionary, append_eos=False)
-  tag_corpus_dev = data.read_tags(parsed_args.data_prefix + "valid.tag.txt")
+  prefix_corpus_train = data.SentCorpus(os.path.join(parsed_args.data_prefix, "train.prefx.txt"), task.source_dictionary, append_eos=False)
+  tag_corpus_train = data.read_tags(os.path.join(parsed_args.data_prefix, "train.tag.txt"))
+  prefix_corpus_dev = data.SentCorpus(os.path.join(parsed_args.data_prefix, "valid.prefx.txt"), task.source_dictionary, append_eos=False)
+  tag_corpus_dev = data.read_tags(os.path.join(parsed_args.data_prefix, "valid.tag.txt"))
 
   # batchify3: pads at the beginning, may introduce slight bias, but should be fine overall
   prefix_data_train = batchify2(prefix_corpus_train.test, parsed_args.finetune_batch_size, prefix_corpus_train.dictionary.pad_index)
