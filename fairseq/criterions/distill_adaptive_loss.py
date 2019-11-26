@@ -74,7 +74,7 @@ class DistillAdaptiveLoss(AdaptiveLoss):
     teacher_output, _ = self.teacher_model[0](sample['net_input']['src_tokens'].to('cuda:1'), None)
     teacher_dist = self.teacher_model[0].get_normalized_probs([teacher_output], log_probs=False).detach()
     lprobs = model.get_normalized_probs(net_output, log_probs=True)
-    ce_loss = F.kl_div(lprobs, teacher_dist.to('cuda:0'))
+    ce_loss = -torch.sum(lprobs * teacher_dist.to('cuda:0'))
 
     loss = self.alpha_ce * ce_loss + self.alpha_clm * clm_loss
 
