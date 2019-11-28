@@ -38,7 +38,7 @@ class FairseqDecoder(nn.Module):
     def prepare_for_onnx_export_(self):
         self.onnx_trace = True
 
-    def get_normalized_probs(self, net_output, log_probs, sample):
+    def get_normalized_probs(self, net_output, log_probs, sample, no_backward=False):
         """Get normalized probabilities (or log probs) from a net's output."""
 
         if hasattr(self, 'adaptive_softmax') and self.adaptive_softmax is not None:
@@ -47,7 +47,7 @@ class FairseqDecoder(nn.Module):
                 target = sample['target']
             else:
                 target = None
-            out = self.adaptive_softmax.get_log_prob(net_output[0], target=target)
+            out = self.adaptive_softmax.get_log_prob(net_output[0], target=target, no_backward=no_backward)
             return out.exp_() if not log_probs else out
 
         logits = net_output[0]

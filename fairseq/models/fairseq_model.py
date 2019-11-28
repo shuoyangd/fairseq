@@ -35,10 +35,10 @@ class BaseFairseqModel(nn.Module):
         """Get targets from either the sample or the net's output."""
         return sample['target']
 
-    def get_normalized_probs(self, net_output, log_probs, sample=None):
+    def get_normalized_probs(self, net_output, log_probs, sample=None, no_backward=False):
         """Get normalized probabilities (or log probs) from a net's output."""
         if hasattr(self, 'decoder'):
-            return self.decoder.get_normalized_probs(net_output, log_probs, sample)
+            return self.decoder.get_normalized_probs(net_output, log_probs, sample, no_backward)
         elif torch.is_tensor(net_output):
             logits = net_output.float()
             if log_probs:

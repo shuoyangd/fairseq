@@ -170,7 +170,7 @@ class AdaptiveSoftmax(nn.Module):
 
         return output, new_target
 
-    def get_log_prob(self, input, target):
+    def get_log_prob(self, input, target, no_backward=False):
         """
         Computes the log probabilities for all the words of the vocabulary,
         given a 2D tensor of hidden vectors.
@@ -196,17 +196,26 @@ class AdaptiveSoftmax(nn.Module):
             end = self.cutoff[i + 1]
 
             if target_idxs is None:
-                # the master branch head will introduce some in-place operations and hence
-                # will not work with backprop, this updated version will work
-                # tail_out = log_probs[:, start:end]
-                # tail_out.copy_(self.tail[i](input))
-                tail_out = self.tail[i](input)
-                log_probs[:, start:end] = self.lsm(tail_out).add(tail_priors[:, i, None])
+                if no_backward:
+                    tail_out = log_probs[:, start:end]
+                    tail_out.copy_(self.tail[i](input))
+                    log_probs[:, start:end] = self.lsm(tail_out).add_(tail_priors[:, i, None])
+                else:
+                    # the master branch head will introduce some in-place operations and hence
+                    # will not work with backprop, this updated version will work
+                    # tail_out = log_probs[:, start:end]
+                    # tail_out.copy_(self.tail[i](input))
+                    tail_out = self.tail[i](input)
+                    log_probs[:, start:end] = self.lsm(tail_out).add(tail_priors[:, i, None])
             elif target_idxs[i] is not None:
                 idxs = target_idxs[i]
                 tail_out = log_probs[idxs, start:end]
                 tail_out.copy_(self.tail[i](input[idxs]))
                 log_probs[idxs, start:end] = self.lsm(tail_out).add(tail_priors[idxs, i, None])
 
-        log_probs = log_probs.view(bsz, length, -1)
+        if no_backward:
+            log_probs.detach_()
+            log_probs = log_probs.view(bsz, length, -1)
+        else:
+            log_probs = log_probs.view(bsz, length, -1)
         return log_probs

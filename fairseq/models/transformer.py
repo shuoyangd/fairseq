@@ -252,6 +252,32 @@ class TransformerLanguageModel(FairseqLanguageModel):
         decoder = TransformerDecoder(
             args, task.output_dictionary, embed_tokens, no_encoder_attn=True, final_norm=False,
         )
+
+        # distillation
+        if hasattr(args, 'teacher_model'):
+            path = args.teacher_model
+            teacher_model, teacher_model_args = utils.load_ensemble_for_inference(
+                path.split(':'), task, model_arg_overrides=None,
+            )
+            teacher_model = teacher_model[0]
+
+            # initialize some modules with teacher model
+            # embedding
+            decoder.embed_tokens.load_state_dict(teacher_model.decoder.embed_tokens.state_dict())
+
+            # layers
+            num_teacher_layers = len(teacher_model.decoder.layers)
+            layer_ids = [ i for i in range(0, num_teacher_layers - 1, num_teacher_layers // args.decoder_layers) ]
+            layer_ids[-1] = num_teacher_layers - 1
+            for idx, teacher_idx in enumerate(layer_ids):
+                decoder.layers[idx].load_state_dict(teacher_model.decoder.layers[teacher_idx].state_dict())
+
+            # softmax
+            decoder.adaptive_softmax.load_state_dict(teacher_model.decoder.adaptive_softmax.state_dict())
+
+            # destroy teacher to save memory
+            del teacher_model
+
         return TransformerLanguageModel(decoder)
 
 
