@@ -273,6 +273,11 @@ class TransformerLanguageModel(FairseqLanguageModel):
                 decoder.layers[idx].load_state_dict(teacher_model.decoder.layers[teacher_idx].state_dict())
 
             # softmax
+            # there seems to be some oddities associated with pre-trained models
+            if teacher_model.decoder.adaptive_softmax.tail[0][0].weight.size() != decoder.adaptive_softmax.tail[0][0].weight.size():
+                teacher_model.decoder.adaptive_softmax.tail[0][0].weight = nn.Parameter(teacher_model.decoder.adaptive_softmax.tail[0][0].weight.transpose(0, 1))
+            if teacher_model.decoder.adaptive_softmax.tail[1][0].weight.size() != decoder.adaptive_softmax.tail[1][0].weight.size():
+                teacher_model.decoder.adaptive_softmax.tail[1][0].weight = nn.Parameter(teacher_model.decoder.adaptive_softmax.tail[1][0].weight.transpose(0, 1))
             decoder.adaptive_softmax.load_state_dict(teacher_model.decoder.adaptive_softmax.state_dict())
 
             # destroy teacher to save memory

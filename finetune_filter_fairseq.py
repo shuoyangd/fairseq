@@ -12,6 +12,7 @@ import os.path
 import pdb
 import torch
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 # cudnn backward cannot be called at eval mode
 import torch.backends.cudnn as cudnn
 cudnn.enabled = False
@@ -156,6 +157,8 @@ def main(parsed_args):
   else:
     optimizer = eval("torch.optim." + parsed_args.finetune_optimizer)(filter(lambda param: param.requires_grad, model.decoder.parameters()), lr=parsed_args.finetune_learning_rate)
 
+  scheduler = ReduceLROnPlateau(optimizer, 'min', factor=parsed_args.finetune_lr_shrink)
+
   prefix_corpus_train = data.SentCorpus(os.path.join(parsed_args.data_prefix, "train.prefx.txt"), task.source_dictionary, append_eos=False)
   tag_corpus_train = data.read_tags(os.path.join(parsed_args.data_prefix, "train.tag.txt"))
   prefix_corpus_dev = data.SentCorpus(os.path.join(parsed_args.data_prefix, "valid.prefx.txt"), task.source_dictionary, append_eos=False)
@@ -169,7 +172,9 @@ def main(parsed_args):
 
   for epoch in range(parsed_args.max_epoch):
     model = finetune(prefix_data_train, tag_data_train, model, parsed_args.outdir, optimizer, epoch, parsed_args.cuda)
-    print("valid loss after epoch {0}: {1}".format(epoch, validate(prefix_data_dev, tag_data_dev, model, parsed_args.cuda)))
+    valid_loss = validate(prefix_data_dev, tag_data_dev, model, parsed_args.cuda)
+    scheduler.step(valid_loss)
+    print("valid loss after epoch {0}: {1}".format(epoch, valid_loss))
 
 
 def cli_main():
@@ -184,6 +189,7 @@ def cli_main():
     parser.add_argument("--finetune-optimizer", type=str, choices=["SGD", "Adam"], default="Adam")
     parser.add_argument("--finetune-momentum", type=float, default=0.99, help="momentum for SGD")
     parser.add_argument("--finetune-learning-rate", '-lr', type=float, default=0.001)
+    parser.add_argument("--finetune-lr-shrink", type=float, default=0.5)
 
     args = options.parse_args_and_arch(parser)
     main(args)
