@@ -254,7 +254,7 @@ class TransformerLanguageModel(FairseqLanguageModel):
         )
 
         # distillation
-        if hasattr(args, 'teacher_model'):
+        if hasattr(args, 'teacher_model') and args.teacher_model and args.teacher_model != "None":
             path = args.teacher_model
             teacher_model, teacher_model_args = utils.load_ensemble_for_inference(
                 path.split(':'), task, model_arg_overrides=None,

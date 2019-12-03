@@ -67,6 +67,7 @@ def get_normalized_probs(output, weight, bias=None, log_probs=True):
 
 def finetune(prefix_data, tag_data, model, outdir, optimizer, epoch_n, cuda=False):
   iter_ = 0
+  model.train()
   for (prefix_batch, prefix_mask), (tag_batch, _) in \
       zip(zip(prefix_data[0], prefix_data[1]), zip(tag_data[0], tag_data[1])):
 
@@ -102,6 +103,7 @@ def finetune(prefix_data, tag_data, model, outdir, optimizer, epoch_n, cuda=Fals
 def validate(prefix_data, tag_data, model, cuda=False):
   raw_loss = 0.0
   n_samples = 0
+  model.eval()
   for (prefix_batch, prefix_mask), (tag_batch, _) in \
       zip(zip(prefix_data[0], prefix_data[1]), zip(tag_data[0], tag_data[1])):
 
@@ -122,7 +124,7 @@ def validate(prefix_data, tag_data, model, cuda=False):
     probs = torch.gather(probs, 0, final_prefix_index).squeeze(0)  # (bsz, vocab_size)
 
     loss = -torch.sum(torch.gather(probs, 1, tag_batch.transpose(0, 1)))  # (bsz, 1)
-    raw_loss += loss
+    raw_loss += loss.detach_()
 
   return raw_loss / n_samples
 
