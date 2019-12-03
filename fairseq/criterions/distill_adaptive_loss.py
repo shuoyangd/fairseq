@@ -21,11 +21,11 @@ class DistillAdaptiveLoss(AdaptiveLoss):
   def __init__(self, args, task):
     super().__init__(args, task)
     path = args.teacher_model
-    model, model_args = utils.load_ensemble_for_inference(
+    model, _ = utils.load_ensemble_for_inference(
         path.split(':'), task, model_arg_overrides=None,
     )
     assert len(model) == 1
-    real_teacher_model = model[0].cuda()
+    real_teacher_model = model[0].to('cuda:1')
     real_teacher_model.eval()
     self.teacher_model = [real_teacher_model]  # avoid being count as param
     self.alpha_ce = args.alpha_ce
@@ -77,14 +77,23 @@ class DistillAdaptiveLoss(AdaptiveLoss):
             clm_loss += F.cross_entropy(logits[i], target[i], size_average=False, ignore_index=self.padding_idx,
                                     reduce=reduce)
 
-    teacher_output, _ = self.teacher_model[0](sample['net_input']['src_tokens'], None)
-    teacher_output = teacher_output.detach() / self.temp
-    teacher_dist = self.teacher_model[0].get_normalized_probs([teacher_output], log_probs=False, no_backward=True)
-    lprobs = model.get_normalized_probs(net_output, log_probs=True)
-    ce_loss = -torch.sum(lprobs * teacher_dist)
+    seq_len = sample['net_input']['src_tokens'].size(1)
+    block_size = seq_len // 4
+    teacher_output, _ = self.teacher_model[0](sample['net_input']['src_tokens'].to('cuda:1'), None)
+    teacher_output = teacher_output / self.temp
+    ce_loss = 0.0
+    for block_start in range(0, seq_len - 1, block_size):
+        teacher_dist = self.teacher_model[0].get_normalized_probs([teacher_output[:, block_start:block_start+block_size, :]], log_probs=False, no_backward=True)
+        lprobs = model.get_normalized_probs(net_output[:, block_start:block_start+block_size, :], log_probs=True)
+        ce_loss -= torch.sum(lprobs * teacher_dist.to('cuda:0'))
+
+    remainder_size = seq_len % block_size
+    teacher_dist = self.teacher_model[0].get_normalized_probs([teacher_output[:, -remainder_size:, :]], log_probs=False, no_backward=True)
+    lprobs = model.get_normalized_probs(net_output[:, -remainder_size:, :], log_probs=True)
+    ce_loss -= torch.sum(lprobs * teacher_dist.to('cuda:0'))
 
     target = net_output[0].new(net_output[0].size(0)).fill_(1)
-    cos_loss = F.cosine_embedding_loss(net_output[0], teacher_output, target)
+    cos_loss += F.cosine_embedding_loss(net_output[0], teacher_output.to('cuda:0'), target)
 
     loss = self.alpha_ce * ce_loss + self.alpha_clm * clm_loss + self.alpha_cos * cos_loss
 
