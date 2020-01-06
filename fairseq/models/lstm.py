@@ -192,7 +192,7 @@ class LSTMEncoder(FairseqEncoder):
             self.output_units *= 2
 
 
-    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0, abs_saliency=False, alpha=None):
+    def forward(self, src_tokens, src_lengths, smoothing_factor=0.0, li_saliency=False, alpha=None):
         if self.left_pad:
             # convert left-padding to right-padding
             src_tokens = utils.convert_padding_direction(
@@ -203,18 +203,28 @@ class LSTMEncoder(FairseqEncoder):
 
         bsz, seqlen = src_tokens.size()
 
-        sel = torch.ones_like(src_tokens).float()
-        sel.requires_grad = True
-        sel.register_hook(lambda grad: SaliencyManager.compute_saliency(grad, abs_saliency))
+        if not li_saliency:
+            sel = torch.ones_like(src_tokens).float()
+            sel.requires_grad = True
+            sel.register_hook(lambda grad: SaliencyManager.compute_saliency(grad))
 
         # embed tokens
         x = self.embed_tokens(src_tokens)
-        xp = x.permute(2, 0, 1)
-        if alpha is None:
-            xp = xp * sel
+
+        if not li_saliency:
+            xp = x.permute(2, 0, 1)
+            if alpha is None:
+                xp = xp * sel
+            else:
+                xp = xp * sel * alpha.unsqueeze(1)
+            x = xp.permute(1, 2, 0)
         else:
-            xp = xp * sel * alpha.unsqueeze(1)
-        x = xp.permute(1, 2, 0)
+            x.register_hook(lambda grad: SaliencyManager.compute_li_et_al_saliency(grad))
+            if alpha is not None:
+                xp = x.permute(2, 0, 1)
+                xp = xp * alpha.unsqueeze(1)
+                x = xp.permute(1, 2, 0)
+
         if smoothing_factor > 0.0:
             x = x + torch.normal(torch.zeros_like(x), \
                     torch.ones_like(x) * smoothing_factor * (torch.max(x) - torch.min(x)))

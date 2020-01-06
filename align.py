@@ -172,7 +172,7 @@ def main(args):
         net_input['smoothing_factor'] = args.smoothing_factor
 
         if args.abs:
-            net_input['abs_saliency'] = True
+            net_input['li_saliency'] = True
 
         # TODO: assuming batch_size = 1 for this if
         # clean up later

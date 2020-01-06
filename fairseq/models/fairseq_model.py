@@ -16,11 +16,13 @@ class SaliencyManager:
     single_sentence_saliency = []
 
     @classmethod
-    def compute_saliency(cls, grad, abs_saliency=False):
-        if abs_saliency:
-            grad = torch.abs(grad).detach().cpu()
-        else:
-            grad = torch.clamp(grad, min=0.0).detach().cpu()
+    def compute_saliency(cls, grad):
+        grad = torch.clamp(grad, min=0.0).detach().cpu()
+        cls.single_sentence_saliency.append(grad / torch.sum(grad, dim=1).unsqueeze(1))
+
+    @classmethod
+    def compute_li_et_al_saliency(cls, grad):
+        grad = torch.mean(torch.abs(grad), dim=-1).detach().cpu()
         cls.single_sentence_saliency.append(grad / torch.sum(grad, dim=1).unsqueeze(1))
 
     @classmethod
@@ -153,7 +155,7 @@ class FairseqModel(BaseFairseqModel):
         assert isinstance(self.encoder, FairseqEncoder)
         assert isinstance(self.decoder, FairseqDecoder)
 
-    def forward(self, src_tokens, src_lengths, prev_output_tokens, smoothing_factor=0.0, abs_saliency=False, alpha=[]):
+    def forward(self, src_tokens, src_lengths, prev_output_tokens, smoothing_factor=0.0, li_saliency=False, alpha=None):
         """
         Run the forward pass for an encoder-decoder model.
 
@@ -174,7 +176,7 @@ class FairseqModel(BaseFairseqModel):
         Returns:
             the decoder's output, typically of shape `(batch, tgt_len, vocab)`
         """
-        encoder_out = self.encoder(src_tokens, src_lengths, smoothing_factor, abs_saliency, alpha)
+        encoder_out = self.encoder(src_tokens, src_lengths, smoothing_factor, li_saliency, alpha)
         decoder_out = self.decoder(prev_output_tokens, encoder_out)
         return decoder_out
 
