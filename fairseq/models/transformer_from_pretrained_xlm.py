@@ -4,9 +4,10 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
+import torch
 from typing import Any, Dict
 
-from fairseq import checkpoint_utils
+from fairseq import checkpoint_utils, utils
 from fairseq.data.legacy.masked_lm_dictionary import MaskedLMDictionary
 from fairseq.models import register_model, register_model_architecture
 from fairseq.models.transformer import (
@@ -14,6 +15,9 @@ from fairseq.models.transformer import (
     TransformerEncoder,
     TransformerModel,
     base_architecture as transformer_base_architecture,
+)
+from fairseq.modules import (
+    SinusoidalPositionalEmbedding
 )
 
 
@@ -93,20 +97,36 @@ def upgrade_state_dict_with_xlm_weights(
     state = checkpoint_utils.load_checkpoint_to_cpu(pretrained_xlm_checkpoint)
     xlm_state_dict = state["model"]
     for key in xlm_state_dict.keys():
-
-        for search_key in ["embed_tokens", "embed_positions", "layers"]:
+        for search_key in ["embed_tokens", "embed_positions", "layers", "emb_layer_norm"]:
             if search_key in key:
                 subkey = key[key.find(search_key):]
-                assert subkey in state_dict, (
-                    "{} Transformer encoder / decoder "
-                    "state_dict does not contain {}. Cannot "
-                    "load {} from pretrained XLM checkpoint "
-                    "{} into Transformer.".format(
-                        str(state_dict.keys()),
-                        subkey, key, pretrained_xlm_checkpoint)
-                    )
-
-                state_dict[subkey] = xlm_state_dict[key]
+                if key.endswith("self_attn.in_proj_weight"):
+                    divide_idx = subkey.find("in_proj_weight")
+                    prefix = subkey[:divide_idx]
+                    dim = xlm_state_dict[key].shape[0] // 3
+                    state_dict[prefix + "q_proj.weight"] = xlm_state_dict[key][0:dim]
+                    state_dict[prefix + "k_proj.weight"] = xlm_state_dict[key][dim:dim*2]
+                    state_dict[prefix + "v_proj.weight"] = xlm_state_dict[key][dim*2:dim*3]
+                elif key.endswith("self_attn.in_proj_bias"):
+                    divide_idx = subkey.find("in_proj_bias")
+                    prefix = subkey[:divide_idx]
+                    dim = xlm_state_dict[key].shape[0] // 3
+                    state_dict[prefix + "q_proj.bias"] = xlm_state_dict[key][0:dim]
+                    state_dict[prefix + "k_proj.bias"] = xlm_state_dict[key][dim:dim*2]
+                    state_dict[prefix + "v_proj.bias"] = xlm_state_dict[key][dim*2:dim*3]
+                elif search_key == "emb_layer_norm":
+                    subkey = subkey.replace("emb_layer_norm", "layernorm_embedding")
+                    state_dict[subkey] = xlm_state_dict[key]
+                else:
+                    assert subkey in state_dict, (
+                        "{} Transformer encoder / decoder "
+                        "state_dict does not contain {}. Cannot "
+                        "load {} from pretrained XLM checkpoint "
+                        "{} into Transformer.".format(
+                            str(state_dict.keys()),
+                            subkey, key, pretrained_xlm_checkpoint)
+                        )
+                    state_dict[subkey] = xlm_state_dict[key]
     return state_dict
 
 
