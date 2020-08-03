@@ -588,8 +588,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             incremental_state=incremental_state,
             **extra_args
         )
-        if not features_only:
-            x = self.output_layer(x)
+        # if not features_only:
+        #     x = self.output_layer(x)
         return x, extra
 
     def extract_features(

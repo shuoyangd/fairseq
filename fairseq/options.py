@@ -408,6 +408,12 @@ def add_checkpoint_args(parser):
                        help='metric to use for saving "best" checkpoints')
     group.add_argument('--maximize-best-checkpoint-metric', action='store_true',
                        help='select the largest metric value for saving "best" checkpoints')
+    group.add_argument('--decoder-states-dump-dir', type=str, default=None, metavar='PATH',
+                       help='directory to dump decoder states for analysis')
+    group.add_argument('--dump-ok-bad-label', action='store_true', default=False,
+                       help='aside from dumping deocder states, also dump ok/bad label of target words (default=False)')
+    group.add_argument('--retrain-generator', action='store_true', default=False,
+                       help='re-initialize and re-train the final layer of the network (default=False)')
     # fmt: on
     return group
 
@@ -498,6 +504,8 @@ def add_generation_args(parser):
     group.add_argument('--print-alignment', action='store_true',
                        help='if set, uses attention feedback to compute and print alignment to source tokens')
     group.add_argument('--print-step', action='store_true')
+    group.add_argument('--decoder-states-dump-dir', default=None, type=str, metavar='PATH',
+                       help='dump the decoder hidden states for analysis')
 
     # arguments for iterative refinement generator
     group.add_argument('--iter-decode-eos-penalty', default=0.0, type=float, metavar='N',
