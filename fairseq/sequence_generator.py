@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import h5py
 import math
 
 import torch
@@ -10,7 +11,9 @@ import torch
 from fairseq import search, utils
 from fairseq.data import data_utils
 from fairseq.models import FairseqIncrementalDecoder
+from fairseq.criterions.label_smoothed_cross_entropy import HDF5_CHUNK_SIZE
 
+DECODER_EMBED_DIM = 512
 
 class SequenceGenerator(object):
     def __init__(
@@ -32,6 +35,7 @@ class SequenceGenerator(object):
         diverse_beam_strength=0.5,
         match_source_len=False,
         no_repeat_ngram_size=0,
+        decoder_states_dump_dir=None,
     ):
         """Generates translations of a given source sentence.
 
@@ -82,6 +86,7 @@ class SequenceGenerator(object):
         self.temperature = temperature
         self.match_source_len = match_source_len
         self.no_repeat_ngram_size = no_repeat_ngram_size
+        self.decoder_states_dump_dir = decoder_states_dump_dir
         assert sampling_topk < 0 or sampling, '--sampling-topk requires --sampling'
         assert sampling_topp < 0 or sampling, '--sampling-topp requires --sampling'
         assert temperature > 0, '--temperature must be greater than 0'
@@ -96,6 +101,27 @@ class SequenceGenerator(object):
             )
         else:
             self.search = search.BeamSearch(tgt_dict)
+
+        if self.decoder_states_dump_dir is not None:
+            self.decoder_states_dump_file = h5py.File(self.decoder_states_dump_dir, 'w')
+            self.state_tokens_dump_file = h5py.File(self.decoder_states_dump_dir + ".tokens", 'w')
+            self.dump_log_file = open(self.decoder_states_dump_dir + ".log", 'w')
+            self.not_dummy_batch = False
+            self.decoder_states_dataset = \
+                self.decoder_states_dump_file.create_dataset("decoder_states",
+                                                             (0, DECODER_EMBED_DIM),
+                                                             maxshape=(None, None),
+                                                             dtype='f',
+                                                             chunks=(HDF5_CHUNK_SIZE, DECODER_EMBED_DIM))
+            self.state_tokens_dataset = \
+                self.state_tokens_dump_file.create_dataset("tokens",
+                                                           (0,),
+                                                           maxshape=(None,),
+                                                           dtype='i',
+                                                           chunks=(HDF5_CHUNK_SIZE,))
+            self.decoder_states_count = 0
+        else:
+            self.decoder_states_dump_file = None
 
     @torch.no_grad()
     def generate(self, models, sample, **kwargs):
@@ -291,9 +317,36 @@ class SequenceGenerator(object):
                 model.reorder_incremental_state(reorder_state)
                 encoder_outs = model.reorder_encoder_out(encoder_outs, reorder_state)
 
-            lprobs, avg_attn_scores = model.forward_decoder(
+            lprobs, avg_attn_scores, decoder_out = model.forward_decoder(
                 tokens[:, :step + 1], encoder_outs, temperature=self.temperature,
             )
+
+            if self.decoder_states_dump_dir is not None and self.not_dummy_batch:
+
+                x = decoder_out[0].detach().contiguous().view(-1, decoder_out[0].size(-1))
+                _, target = torch.max(lprobs, dim=-1)
+                target = target.view(-1)
+
+                remaining_dp_counts = x.size(0)
+                initial_chunk_size = min(remaining_dp_counts, HDF5_CHUNK_SIZE - (self.decoder_states_count - 1) % HDF5_CHUNK_SIZE - 1)
+                self.decoder_states_dataset[self.decoder_states_count:self.decoder_states_count+initial_chunk_size, :] = x[:initial_chunk_size, :].cpu()
+                self.state_tokens_dataset[self.decoder_states_count:self.decoder_states_count+initial_chunk_size] = target[:initial_chunk_size].cpu()
+                self.decoder_states_count += initial_chunk_size
+                remaining_dp_counts -= initial_chunk_size
+                while remaining_dp_counts > 0:
+                    self.decoder_states_dataset.resize(self.decoder_states_dataset.shape[0] + HDF5_CHUNK_SIZE, axis=0)
+                    self.state_tokens_dataset.resize(self.state_tokens_dataset.shape[0] + HDF5_CHUNK_SIZE, axis=0)
+                    chunk_size = min(remaining_dp_counts, HDF5_CHUNK_SIZE)
+                    startpoint = x.size(0) - remaining_dp_counts
+                    self.decoder_states_dataset[self.decoder_states_count:self.decoder_states_count+chunk_size, :] =\
+                        x[startpoint:startpoint+chunk_size, :].cpu()
+                    self.state_tokens_dataset[self.decoder_states_count:self.decoder_states_count+chunk_size] =\
+                        target[startpoint:startpoint+chunk_size].cpu()
+                    self.decoder_states_count += chunk_size
+                    remaining_dp_counts -= chunk_size
+                self.dump_log_file.write("current batch has {0} states, writing into a database with capacity {1}. after writing, there are {2} states in database\n".format(x.size(0), self.decoder_states_dataset.shape[0], self.decoder_states_count))
+
+            self.not_dummy_batch = True
 
             lprobs[:, self.pad] = -math.inf  # never select pad
             lprobs[:, self.unk] -= self.unk_penalty  # apply unk penalty
@@ -555,8 +608,11 @@ class EnsembleModel(torch.nn.Module):
 
         log_probs = []
         avg_attn = None
+        # TODO: decoder_out does not support ensemble for the moment
+        # for now it will hold content of the last model
+        decoder_out = None
         for model, encoder_out in zip(self.models, encoder_outs):
-            probs, attn = self._decode_one(
+            probs, attn, decoder_out = self._decode_one(
                 tokens,
                 model,
                 encoder_out,
@@ -573,7 +629,7 @@ class EnsembleModel(torch.nn.Module):
         avg_probs = torch.logsumexp(torch.stack(log_probs, dim=0), dim=0) - math.log(len(self.models))
         if avg_attn is not None:
             avg_attn.div_(len(self.models))
-        return avg_probs, avg_attn
+        return avg_probs, avg_attn, decoder_out
 
     def _decode_one(
         self, tokens, model, encoder_out, incremental_states, log_probs,
@@ -595,7 +651,7 @@ class EnsembleModel(torch.nn.Module):
             attn = attn[:, -1, :]
         probs = model.get_normalized_probs(decoder_out, log_probs=log_probs)
         probs = probs[:, -1, :]
-        return probs, attn
+        return probs, attn, decoder_out
 
     def reorder_encoder_out(self, encoder_outs, new_order):
         if not self.has_encoder():

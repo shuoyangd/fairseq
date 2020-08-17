@@ -5,7 +5,6 @@
 
 import h5py
 import math
-import pdb
 import torch
 
 from fairseq import utils
