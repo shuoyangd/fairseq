@@ -862,6 +862,13 @@ def transformer_wmt_en_de(args):
     base_architecture(args)
 
 
+@register_model_architecture('transformer', 'transformer_kasai2020_en_de')
+def transformer_kasai2020_en_de(args):
+    args.encoder_layers = getattr(args, 'encoder_layers', 11)
+    args.decoder_layers = getattr(args, 'decoder_layers', 1)
+    base_architecture(args)
+
+
 # parameters used in the "Attention Is All You Need" paper (Vaswani et al., 2017)
 @register_model_architecture('transformer', 'transformer_vaswani_wmt_en_de_big')
 def transformer_vaswani_wmt_en_de_big(args):
