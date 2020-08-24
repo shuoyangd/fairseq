@@ -22,6 +22,7 @@ from fairseq.modules import (
     AdaptiveSoftmax,
     LayerNorm,
     PositionalEmbedding,
+    SalienceManager,
     SinusoidalPositionalEmbedding,
     TransformerDecoderLayer,
     TransformerEncoderLayer,
@@ -361,7 +362,8 @@ class TransformerEncoder(FairseqEncoder):
         x = F.dropout(x, p=self.dropout, training=self.training)
         return x, embed
 
-    def forward(self, src_tokens, src_lengths, cls_input=None, return_all_hiddens=False, **unused):
+    def forward(self, src_tokens, src_lengths, cls_input=None, return_all_hiddens=False, \
+            smoothing_factor=0.0, alpha=None, **unused):
         """
         Args:
             src_tokens (LongTensor): tokens in the source language of shape
@@ -370,6 +372,7 @@ class TransformerEncoder(FairseqEncoder):
                 shape `(batch)`
             return_all_hiddens (bool, optional): also return all of the
                 intermediate hidden states (default: False).
+            alpha shape `(batch)`
 
         Returns:
             namedtuple:
@@ -387,6 +390,11 @@ class TransformerEncoder(FairseqEncoder):
             return_all_hiddens = True
 
         x, encoder_embedding = self.forward_embedding(src_tokens)
+        x = x * alpha.unsqueeze(1)  # expand to B x 1
+
+        if smoothing_factor > 0.0:
+            x = x + torch.normal(torch.zeros_like(x), \
+                    torch.ones_like(x) * smoothing_factor * (torch.max(x) - torch.min(x)))
 
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
@@ -404,6 +412,14 @@ class TransformerEncoder(FairseqEncoder):
             dropout_probability = random.uniform(0, 1)
             if not self.training or (dropout_probability > self.encoder_layerdrop):
                 x = layer(x, encoder_padding_mask)
+
+                sel = torch.ones_like(src_tokens).float()
+                sel.requires_grad = True
+                sel.register_hook(lambda grad: SalienceManager.compute_saliency(grad))
+
+                xp = x.permute(2, 0, 1)  # mult happens between the last two dims
+                xp = xp * sel
+                x = xp.permute(1, 2, 0)
                 if return_all_hiddens:
                     encoder_states.append(x)
 
@@ -685,6 +701,15 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                     need_attn=(idx == alignment_layer),
                     need_head_weights=(idx == alignment_layer),
                 )
+
+                sel = torch.ones(x.size(0), x.size(1)).float()
+                sel.requires_grad = True
+                sel.register_hook(lambda grad: SalienceManager.compute_saliency(grad))
+
+                xp = x.permute(2, 0, 1)  # mult happens between the last two dims
+                xp = xp * sel
+                x = xp.permute(1, 2, 0)
+
                 inner_states.append(x)
                 if layer_attn is not None and idx == alignment_layer:
                     attn = layer_attn.float()
