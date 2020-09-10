@@ -15,7 +15,9 @@ from fairseq.meters import StopwatchMeter, TimeMeter
 from fairseq.sequence_generator import SequenceGenerator
 from fairseq.sequence_scorer import SequenceScorer
 from fairseq.models.lstm import LSTMEncoder
-from fairseq.modules import SaliencyManager
+from fairseq.modules import SalienceManager
+
+N_LAYERS=12
 
 def parallel_buffered_read(src_stream, tgt_stream, buffer_size):
     buffer = []
@@ -30,11 +32,11 @@ def parallel_buffered_read(src_stream, tgt_stream, buffer_size):
 
 def make_batches(src_lines, tgt_lines, args, task, max_positions):
     src_tokens = [
-        tokenizer.Tokenizer.tokenize(src_str, task.source_dictionary, add_if_not_exist=False).long()
+        task.source_dictionary.encode_line(src_str, add_if_not_exist=False).long()  # fairseq 0.9 change
         for src_str in src_lines
     ]
     tgt_tokens = [
-        tokenizer.Tokenizer.tokenize(tgt_str, task.target_dictionary, add_if_not_exist=False).long()
+        task.target_dictionary.encode_line(tgt_str, add_if_not_exist=False).long()  # fairseq 0.9 change
         for tgt_str in tgt_lines
     ]
 
@@ -133,16 +135,18 @@ def main(args):
                 model.zero_grad()
 
         # single sentence saliency will be a list with (tgt * n_samples) of (bsz, src)
-        saliency = torch.stack(SaliencyManager.single_sentence_saliency, dim=1)  # (bsz * n_samples, tgt, src)
-        saliency = saliency.view(bsz, args.n_samples, tlen, -1)  # (bsz, n_samples, tgt, src)
-        saliency = torch.mean(saliency, dim=1)  # (bsz, tgt, src)
+        saliency = torch.stack(SalienceManager.single_sentence_salience, dim=1)  # (bsz * n_samples, tgt * layers, src)
+        saliency = saliency.view(bsz, args.n_samples, tlen * N_LAYERS, -1)  # (bsz, n_samples, tgt * layers, src)
+        saliency = saliency.view(bsz, args.n_samples, tlen, N_LAYERS, -1)  # (bsz, n_samples, tgt, layers, src)
+        saliency = torch.mean(saliency, dim=1)  # (bsz, tgt, layers, src)
+        saliency = saliency.transpose(1, 2)  # (bsz, layers, tgt, src)
         # we don't need to multiply the  x - x' term for integrated because it's always 1
 
         if type(decoder_out[1]) == dict:
             attn = decoder_out[1]['attn']
         else:
             attn = decoder_out[1]
-        SaliencyManager.clear_saliency()
+        SalienceManager.clear_salience()
 
         saliency = saliency.detach().cpu()
         attn = attn.detach().cpu()
@@ -154,14 +158,16 @@ def main(args):
     )
     num_batches = 0
     for inputs in parallel_buffered_read( \
-            open(args.data[0] + "/" + args.source_lang), \
-            open(args.data[0] + "/" + args.target_lang), \
+            open(args.data + "/" + args.source_lang), \
+            open(args.data + "/" + args.target_lang), \
             args.buffer_size
         ):
         src_inputs, tgt_inputs = zip(*inputs)
         for batch in make_batches(src_inputs, tgt_inputs, args, task, max_positions):
             saliency, attn = process_batch(batch)
-            saliencies.append(saliency)
+            # loop over each layer
+            for i in range(saliency.size(1)):
+                saliencies.append(saliency[:, i])
             attns.append(attn)
             num_batches += 1
             if num_batches % 10 == 0:
