@@ -134,8 +134,10 @@ class TransformerModel(FairseqEncoderDecoderModel):
         parser.add_argument('--share-all-embeddings', action='store_true',
                             help='share encoder, decoder and output embeddings'
                                  ' (requires shared dictionary and embed dim)')
-        parser.add_argument('--no-token-positional-embeddings', default=False, action='store_true',
-                            help='if set, disables positional embeddings (outside self attention)')
+        parser.add_argument('--no-enc-token-positional-embeddings', default=False, action='store_true',
+                            help='if set, disables encoder positional embeddings (outside self attention)')
+        parser.add_argument('--no-dec-token-positional-embeddings', default=False, action='store_true',
+                            help='if set, disables decoder positional embeddings (outside self attention)')
         parser.add_argument('--adaptive-softmax-cutoff', metavar='EXPR',
                             help='comma separated list of adaptive softmax cutoff points. '
                                  'Must be used with adaptive_loss criterion'),
@@ -332,7 +334,7 @@ class TransformerEncoder(FairseqEncoder):
         self.embed_positions = PositionalEmbedding(
             args.max_source_positions, embed_dim, self.padding_idx,
             learned=args.encoder_learned_pos,
-        ) if not args.no_token_positional_embeddings else None
+        ) if not args.no_enc_token_positional_embeddings else None
 
         self.layer_wise_attention = getattr(args, 'layer_wise_attention', False)
 
@@ -519,7 +521,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         self.embed_positions = PositionalEmbedding(
             args.max_target_positions, embed_dim, self.padding_idx,
             learned=args.decoder_learned_pos,
-        ) if not args.no_token_positional_embeddings else None
+        ) if not args.no_dec_token_positional_embeddings else None
 
         self.cross_self_attention = getattr(args, 'cross_self_attention', False)
         self.layer_wise_attention = getattr(args, 'layer_wise_attention', False)
