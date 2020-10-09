@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
+import pdb
 
 import torch
 
@@ -161,6 +162,7 @@ class SequenceGenerator(object):
         tokens_buf = tokens.clone()
         tokens[:, 0] = self.eos if bos_token is None else bos_token
         attn, attn_buf = None, None
+        rej_probs = None
 
         # The blacklist indicates candidates that should be ignored.
         # For example, suppose we're sampling and have already finalized 2/5
@@ -223,6 +225,7 @@ class SequenceGenerator(object):
             assert not tokens_clone.eq(self.eos).any()
             tokens_clone[:, step] = self.eos
             attn_clone = attn.index_select(0, bbsz_idx)[:, :, 1:step+2] if attn is not None else None
+            rej_probs_clone = rej_probs.index_select(0, bbsz_idx)[:, :step+1] if rej_probs is not None else None
 
             # compute scores per token position
             pos_scores = scores.index_select(0, bbsz_idx)[:, :step+1]
@@ -266,6 +269,7 @@ class SequenceGenerator(object):
                         'attention': hypo_attn,  # src_len x tgt_len
                         'alignment': None,
                         'positional_scores': pos_scores[i],
+                        'rej_probs': rej_probs_clone[i],
                     }
 
                 if len(finalized[sent]) < beam_size:
@@ -291,7 +295,7 @@ class SequenceGenerator(object):
                 model.reorder_incremental_state(reorder_state)
                 encoder_outs = model.reorder_encoder_out(encoder_outs, reorder_state)
 
-            lprobs, avg_attn_scores = model.forward_decoder(
+            lprobs, avg_attn_scores, avg_rej_probs = model.forward_decoder(
                 tokens[:, :step + 1], encoder_outs, temperature=self.temperature,
             )
 
@@ -350,6 +354,11 @@ class SequenceGenerator(object):
                     attn = scores.new(bsz * beam_size, src_tokens.size(1), max_len + 2)
                     attn_buf = attn.clone()
                 attn[:, :, step + 1].copy_(avg_attn_scores)
+
+            if avg_rej_probs is not None:
+                if rej_probs is None:
+                    rej_probs = scores.new(bsz * beam_size, max_len + 2)
+                rej_probs[:, step + 1].copy_(avg_rej_probs.squeeze(2).squeeze(1))
 
             scores = scores.type_as(lprobs)
             scores_buf = scores_buf.type_as(lprobs)
@@ -437,6 +446,8 @@ class SequenceGenerator(object):
                 if attn is not None:
                     attn = attn.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, attn.size(1), -1)
                     attn_buf.resize_as_(attn)
+                if rej_probs is not None:
+                    rej_probs = rej_probs.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, -1)
                 bsz = new_bsz
             else:
                 batch_idxs = None
@@ -516,6 +527,7 @@ class SequenceGenerator(object):
         # sort by score descending
         for sent in range(len(finalized)):
             finalized[sent] = sorted(finalized[sent], key=lambda r: r['score'], reverse=True)
+
         return finalized
 
 
@@ -554,9 +566,10 @@ class EnsembleModel(torch.nn.Module):
             )
 
         log_probs = []
+        rej_probs = []
         avg_attn = None
         for model, encoder_out in zip(self.models, encoder_outs):
-            probs, attn = self._decode_one(
+            probs, attn, rej_probs = self._decode_one(
                 tokens,
                 model,
                 encoder_out,
@@ -565,15 +578,17 @@ class EnsembleModel(torch.nn.Module):
                 temperature=temperature,
             )
             log_probs.append(probs)
+            rej_probs.append(rej_probs)
             if attn is not None:
                 if avg_attn is None:
                     avg_attn = attn
                 else:
                     avg_attn.add_(attn)
         avg_probs = torch.logsumexp(torch.stack(log_probs, dim=0), dim=0) - math.log(len(self.models))
+        avg_rej_probs = torch.logsumexp(torch.stack(rej_probs, dim=0), dim=0) - math.log(len(self.models))
         if avg_attn is not None:
             avg_attn.div_(len(self.models))
-        return avg_probs, avg_attn
+        return avg_probs, avg_attn, avg_rej_probs
 
     def _decode_one(
         self, tokens, model, encoder_out, incremental_states, log_probs,
@@ -594,8 +609,9 @@ class EnsembleModel(torch.nn.Module):
         if attn is not None:
             attn = attn[:, -1, :]
         probs = model.get_normalized_probs(decoder_out, log_probs=log_probs)
+        rej_probs = model.get_rejection_probs(decoder_out, log_probs=log_probs)
         probs = probs[:, -1, :]
-        return probs, attn
+        return probs, attn, rej_probs
 
     def reorder_encoder_out(self, encoder_outs, new_order):
         if not self.has_encoder():

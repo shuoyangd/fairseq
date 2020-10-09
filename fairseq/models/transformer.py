@@ -161,6 +161,8 @@ class TransformerModel(FairseqEncoderDecoderModel):
                             help='add layernorm to embedding')
         parser.add_argument('--no-scale-embedding', action='store_true',
                             help='if True, dont scale embeddings')
+        parser.add_argument('--rejection-option', action='store_true', default=False,
+                            help='use rejection option during training')
         # fmt: on
 
     @classmethod
@@ -535,6 +537,11 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         self.project_out_dim = Linear(embed_dim, self.output_embed_dim, bias=False) \
             if embed_dim != self.output_embed_dim and not args.tie_adaptive_weights else None
 
+        if args.rejection_option:
+            self.rejection_head = Linear(embed_dim, 1)
+        else:
+            self.rejection_head = None
+
         if args.adaptive_softmax_cutoff is not None:
             self.adaptive_softmax = AdaptiveSoftmax(
                 len(dictionary),
@@ -717,6 +724,9 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 return F.linear(features, self.embed_out)
         else:
             return features
+
+    def rejection_layer(self, features, **kwargs):
+        return F.linear(features, self.rejection_head.weight)
 
     def max_positions(self):
         """Maximum output length supported by the decoder."""

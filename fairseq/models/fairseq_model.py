@@ -51,6 +51,11 @@ class BaseFairseqModel(nn.Module):
                 return F.softmax(logits, dim=-1)
         raise NotImplementedError
 
+    def get_rejection_probs(self, net_output, log_probs):
+        if hasattr(self, 'decoder'):
+            return self.decoder.get_rejection_probs(net_output, log_probs)
+        raise NotImplementedError
+
     def extract_features(self, *args, **kwargs):
         """Similar to *forward* but only return features."""
         return self(*args, **kwargs)

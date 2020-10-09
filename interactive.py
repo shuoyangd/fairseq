@@ -173,6 +173,10 @@ def main(args):
                     id,
                     ' '.join(map(lambda x: '{:.4f}'.format(x), hypo['positional_scores'].tolist()))
                 ))
+                print('R-{}\t{}'.format(
+                    id,
+                    ' '.join(map(lambda x: '{:.4f}'.format(x), hypo['rej_probs'].tolist()))
+                ))
                 if args.print_alignment:
                     alignment_str = " ".join(["{}-{}".format(src, tgt) for src, tgt in alignment])
                     print('A-{}\t{}'.format(

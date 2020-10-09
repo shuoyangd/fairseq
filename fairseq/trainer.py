@@ -327,7 +327,8 @@ class Trainer(object):
                 with maybe_no_sync():
                     # forward and backward
                     loss, sample_size, logging_output = self.task.train_step(
-                        sample, self.model, self.criterion, self.optimizer, ignore_grad
+                        sample, self.model, self.criterion, self.optimizer, ignore_grad,
+                        self.get_num_updates()  # pass number of updates to criterion
                     )
 
                 if not ignore_grad:

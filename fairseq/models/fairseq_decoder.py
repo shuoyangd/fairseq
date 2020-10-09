@@ -51,6 +51,15 @@ class FairseqDecoder(nn.Module):
         """
         raise NotImplementedError
 
+    def rejection_layer(self, features, **kwargs):
+        """
+        Project features to a binary decision of accept or reject
+
+        Args:
+            features (Tensor): features returned by *extract_features*.
+        """
+        raise NotImplementedError
+
     def get_normalized_probs(self, net_output, log_probs, sample):
         """Get normalized probabilities (or log probs) from a net's output."""
 
@@ -68,6 +77,14 @@ class FairseqDecoder(nn.Module):
             return utils.log_softmax(logits, dim=-1, onnx_trace=self.onnx_trace)
         else:
             return utils.softmax(logits, dim=-1, onnx_trace=self.onnx_trace)
+
+    def get_rejection_probs(self, net_output, log_probs):
+
+        logits = self.rejection_layer(net_output[0])
+        if log_probs:
+            return nn.functional.sigmoid(logits).log()
+        else:
+            return nn.functional.sigmoid(logits)
 
     def max_positions(self):
         """Maximum input length supported by the decoder."""
