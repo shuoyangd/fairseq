@@ -11,6 +11,7 @@ import fileinput
 import logging
 import math
 import os
+import re
 import sys
 import time
 from collections import namedtuple
@@ -32,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger("fairseq_cli.interactive")
 
 
-Batch = namedtuple("Batch", "ids src_tokens src_lengths constraints")
+Batch = namedtuple("Batch", "ids src_tokens src_lengths constraints prefixes")
 Translation = namedtuple("Translation", "src_str hypos pos_scores alignments")
 
 
@@ -51,26 +52,53 @@ def buffered_read(input, buffer_size):
 
 def make_batches(lines, args, task, max_positions, encode_fn):
     def encode_fn_target(x):
-        return encode_fn(x)
+        """
+        Don't tokenize leading language codes in format "<de>".
+        """
+        m = re.match(r"^(<..> ?)", x)
+        if m is not None:
+            encoded = m.group(1) + encode_fn(x[len(m.group(0)):])
+        else:
+            encoded = encode_fn(x)
+        return encoded
 
-    if args.constraints:
+    if args.prefix_size > 0 or args.constraints:
         # Strip (tab-delimited) contraints, if present, from input lines,
         # store them in batch_constraints
         batch_constraints = [list() for _ in lines]
-        for i, line in enumerate(lines):
-            if "\t" in line:
-                lines[i], *batch_constraints[i] = line.split("\t")
+        prefixes = None
+        if args.prefix_size > 0:
+            prefixes = torch.zeros((len(lines), args.prefix_size)).long()
 
-        # Convert each List[str] to List[Tensor]
-        for i, constraint_list in enumerate(batch_constraints):
-            batch_constraints[i] = [
-                task.target_dictionary.encode_line(
-                    encode_fn_target(constraint),
+        for i, line in enumerate(lines):
+            fields = line.split("\t")
+            assert (
+                args.prefix_size == 0 or len(fields) >= 2
+            ), "--prefix-size requires a second tab-delimited field"
+
+            if args.prefix_size > 0:
+                prefix = fields.pop(1)
+                assert (
+                    len(prefix.split()) >= args.prefix_size
+                ), "prefix must have at at least --prefix-size tokens"
+                prefixes[i] = task.target_dictionary.encode_line(
+                    encode_fn_target(prefix),
                     append_eos=False,
                     add_if_not_exist=False,
                 )
-                for constraint in constraint_list
-            ]
+
+            lines[i] = fields.pop(0)
+
+            # If any fields remain, use them as constraints
+            if len(fields) > 0:
+                batch_constraints[i] = [
+                    task.target_dictionary.encode_line(
+                        encode_fn_target(constraint),
+                        append_eos=False,
+                        add_if_not_exist=False,
+                    )
+                    for constraint in fields
+                ]
 
     tokens = [
         task.source_dictionary.encode_line(
@@ -105,6 +133,7 @@ def make_batches(lines, args, task, max_positions, encode_fn):
             src_tokens=src_tokens,
             src_lengths=src_lengths,
             constraints=constraints,
+            prefixes=prefixes,
         )
 
 
@@ -207,11 +236,14 @@ def main(args):
             src_tokens = batch.src_tokens
             src_lengths = batch.src_lengths
             constraints = batch.constraints
+            prefixes = batch.prefixes
             if use_cuda:
                 src_tokens = src_tokens.cuda()
                 src_lengths = src_lengths.cuda()
                 if constraints is not None:
                     constraints = constraints.cuda()
+                if prefixes is not None:
+                    prefixes = prefixes.cuda()
 
             sample = {
                 "net_input": {
@@ -221,7 +253,7 @@ def main(args):
             }
             translate_start_time = time.time()
             translations = task.inference_step(
-                generator, models, sample, constraints=constraints
+                generator, models, sample, constraints=constraints, prefix_tokens=prefixes
             )
             translate_time = time.time() - translate_start_time
             total_translate_time += translate_time
