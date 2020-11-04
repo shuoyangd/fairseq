@@ -51,17 +51,6 @@ def buffered_read(input, buffer_size):
 
 
 def make_batches(lines, args, task, max_positions, encode_fn):
-    def encode_fn_target(x):
-        """
-        Don't tokenize leading language codes in format "<de>".
-        """
-        m = re.match(r"^(<..> ?)", x)
-        if m is not None:
-            encoded = m.group(1) + encode_fn(x[len(m.group(0)):])
-        else:
-            encoded = encode_fn(x)
-        return encoded
-
     if args.prefix_size > 0 or args.constraints:
         # Strip (tab-delimited) contraints, if present, from input lines,
         # store them in batch_constraints
@@ -82,7 +71,7 @@ def make_batches(lines, args, task, max_positions, encode_fn):
                     len(prefix.split()) >= args.prefix_size
                 ), "prefix must have at at least --prefix-size tokens"
                 prefixes[i] = task.target_dictionary.encode_line(
-                    encode_fn_target(prefix),
+                    encode_fn(prefix),
                     append_eos=False,
                     add_if_not_exist=False,
                 )
@@ -93,7 +82,7 @@ def make_batches(lines, args, task, max_positions, encode_fn):
             if len(fields) > 0:
                 batch_constraints[i] = [
                     task.target_dictionary.encode_line(
-                        encode_fn_target(constraint),
+                        encode_fn(constraint),
                         append_eos=False,
                         add_if_not_exist=False,
                     )
@@ -220,9 +209,13 @@ def main(args):
     )
 
     if args.constraints:
-        logger.warning(
-            "NOTE: Constrained decoding currently assumes a shared subword vocabulary."
-        )
+        logger.info("Enabled decoding with lexical beam constraints.")
+        if tokenizer is not None or bpe is not None:
+            logger.warning(
+                "NOTE: Applying source-side preprocessing to the constraints. "
+                "If you used different target side preprocessing, you need to "
+                "apply it outside of fairseq."
+            )
 
     if args.buffer_size > 1:
         logger.info("Sentence buffer size: %s", args.buffer_size)
