@@ -17,16 +17,15 @@ translates the sentence *Die maschinelle Übersetzung ist schwer zu kontrolliere
 "hard" and "to influence".
 
     echo -e "Die maschinelle Übersetzung ist schwer zu kontrollieren.\thard\ttoinfluence" \
-    | normalize.py | tok.py \
-    | fairseq-interactive /path/to/model \
+    | $FAIRSEQ/scripts/constraints/preprocess_fields.py \
+      -s de -t en --normalize --tokenize --fastbpe /path/to/model/bpecodes \
+    | PYTHONPATH=$FAIRSEQ python3 -m fairseq_cli.interactive /path/to/model \
       --path /path/to/model/model1.pt \
-      --bpe fastbpe \
-      --bpe-codes /path/to/model/bpecodes \
       --constraints \
       -s de -t en \
       --beam 10
 
-(tok.py and normalize.py can be found in the same directory as this README; they are just shortcuts around Fairseq's WMT19 preprocessing).
+(preprocess_fields.py applies preprocessing to source and target tab-delimited input).
 This will generate the following output:
 
     [snip]
