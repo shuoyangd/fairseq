@@ -74,7 +74,7 @@ def make_batches(lines, args, task, max_positions, encode_fn):
                     encode_fn(prefix),
                     append_eos=False,
                     add_if_not_exist=False,
-                )
+                )[:args.prefix_size]
 
             lines[i] = fields.pop(0)
 
