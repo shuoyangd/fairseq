@@ -36,13 +36,12 @@ where
 - `-sentencepiece` works in the same way.
 """
 
+import re
 import sys
-import sacremoses
-import sentencepiece as sp
-
 
 class Normalizer:
     def __init__(self, lang: str):
+        import sacremoses
         self.lang = lang
         self.model = sacremoses.MosesPunctNormalizer(lang=self.lang)
 
@@ -52,6 +51,7 @@ class Normalizer:
 
 class Tokenizer:
     def __init__(self, lang: str):
+        import sacremoses
         self.lang = lang
         self.model = sacremoses.MosesTokenizer(lang=self.lang)
 
@@ -59,34 +59,56 @@ class Tokenizer:
         return self.model.tokenize(segment, return_str=True)
 
 
-class SPMModel:
+class SubwordSplitter:
+    def __init__(self):
+        pass
+
+    def __call__(self, text):
+        """
+        Segments text, but preserves a segment-initial <..>, so as not to split
+        up a language code (used for example with Prism).
+        """
+        text = text.strip()
+        match = re.match(r"^(<..>)", text)
+        if match is not None:
+            return match.group(1) + " " + self.segment(text[4:].lstrip())
+        else:
+            return self.segment(text)
+
+    def segment(self, text):
+        raise UnimplementedError()
+
+
+class SPMModel(SubwordSplitter):
     def __init__(self, model_file: str):
+        import sentencepiece as sp
         self.model_file = model_file
         self.model = sp.SentencePieceProcessor(model_file=self.model_file)
 
-    def __call__(self, segment):
-        segmented = " ".join(self.model.encode(segment, out_type=str))
+    def segment(self, text):
+        segmented = " ".join(self.model.encode(text, out_type=str))
         return segmented
 
 
-class BPEModel:
+class BPEModel(SubwordSplitter):
     def __init__(self, model_file: str):
         from subword_nmt import apply_bpe
         self.model_file = model_file
         self.model = apply_bpe.BPE(open(self.model_file))
 
-    def __call__(self, segment):
-        segmented = " ".join(self.model.segment(segment))
+    def segment(self, text):
+        segmented = " ".join(self.model.segment(text))
         return segmented
 
-class FastBPEModel:
+
+class FastBPEModel(SubwordSplitter):
     def __init__(self, model_file: str):
         import fastBPE
         self.model_file = model_file
         self.model = fastBPE.fastBPE(model_file)
 
-    def __call__(self, segment):
-        segmented = self.model.apply([segment])[0]
+    def segment(self, text):
+        segmented = self.model.apply([text])[0]
         return segmented
 
 
