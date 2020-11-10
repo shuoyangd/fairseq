@@ -62,7 +62,7 @@ class Search(nn.Module):
         self.src_lengths = src_lengths
 
     @torch.jit.export
-    def init_constraints(self, batch_constraints: Optional[Tensor], beam_size: int):
+    def init_constraints(self, batch_constraints: Optional[Tensor], beam_size: int, prefix_size: int = 0):
         """Initialize constraint states for constrained decoding (if supported).
 
         Args:
@@ -70,6 +70,9 @@ class Search(nn.Module):
                 the list of constraints, in packed form
             beam_size: (int)
                 the beam size
+            prefix_size: (int)
+                Size of the prefix. Constraints are ignored till after the
+                prefix has been generated.
         Returns:
             *encoder_out* rearranged according to *new_order*
         """
@@ -234,7 +237,8 @@ class LexicallyConstrainedBeamSearch(Search):
         self.supports_constraints = True
 
     @torch.jit.export
-    def init_constraints(self, batch_constraints: Optional[Tensor], beam_size: int):
+    def init_constraints(self, batch_constraints: Optional[Tensor], beam_size: int, prefix_size: int = 0):
+        self.prefix_size = prefix_size
         self.constraint_states = []
         for constraint_tensor in batch_constraints:
             if self.representation == "ordered":
@@ -305,9 +309,10 @@ class LexicallyConstrainedBeamSearch(Search):
             lprobs.view(batch_size, -1).size(1) - 1,  # -1 so we never select pad
         )
 
-        # STEP 0: Preliminary. Prevent EOS for unfinished hyps across all batch items
+        # STEP 0: Preliminary. Prevent EOS for unfinished hyps across all batch items.
+        # Don't start processing constraints until after any prefix has been generated.
         constraint_states = self.constraint_states
-        if constraint_states and step > 0:
+        if constraint_states and step > 0 and step > self.prefix_size:
             not_finished_indices = []
             for sentno, sent_constraints in enumerate(constraint_states):
                 for beamno, state in enumerate(sent_constraints):
