@@ -277,7 +277,7 @@ def main(args):
                 for constraint in info["constraints"]:
                     print(
                         "C-{}\t{}".format(
-                            id_, tgt_dict.string(constraint, args.remove_bpe)
+                            id_, tgt_dict.string(constraint, None)
                         )
                     )
 
@@ -292,12 +292,15 @@ def main(args):
                     remove_bpe=args.remove_bpe,
                     extra_symbols_to_ignore=get_symbols_to_strip_from_output(generator),
                 )
-                detok_hypo_str = decode_fn(hypo_str)
+                tok_hypo_str = tgt_dict.string(
+                    hypo["tokens"].int().cpu(), None, get_symbols_to_strip_from_output(generator)
+                )
+
                 score = hypo["score"] / math.log(2)  # convert to base 2
                 # original hypothesis (after tokenization and BPE)
-                print("H-{}\t{}\t{}".format(id_, score, hypo_str))
+                print("H-{}\t{}\t{}".format(id_, score, tok_hypo_str))
                 # detokenized hypothesis
-                print("D-{}\t{}\t{}".format(id_, score, detok_hypo_str))
+                print("D-{}\t{}\t{}".format(id_, score, hypo_str))
                 print(
                     "P-{}\t{}".format(
                         id_,
