@@ -219,7 +219,8 @@ class SequenceGenerator(nn.Module):
             )
 
         # Initialize constraints, when active
-        self.search.init_constraints(constraints, beam_size, prefix_size=prefix_tokens.size(1))
+        prefix_size = prefix_tokens.size(1) if prefix_tokens is not None else 0
+        self.search.init_constraints(constraints, beam_size, prefix_size=prefix_size)
 
         max_len: int = -1
         if self.match_source_len:
@@ -529,6 +530,16 @@ class SequenceGenerator(nn.Module):
             # reorder incremental state in decoder
             reorder_state = active_bbsz_idx
 
+            # print(f"HYPS at step {step} / {max_len}")
+            # idx = 0
+            # for i in range(bsz):
+            #     constraints = self.search.constraint_states
+            #     for j in range(beam_size):
+            #         constraint = str(constraints[i][j].bank) if constraints else ""
+            #         score = torch.sum(scores.view(bsz, beam_size, -1)[i, j, :step+1]) / (step + 1) / math.log(2)
+            #         print(f"  {idx:<3}[{i}]", constraint, f"{score:.3f}", self.tgt_dict.string(tokens.view(bsz, beam_size, -1)[i, j, 0:step+2]))
+            #         idx += 1
+
         # sort by score descending
         for sent in range(len(finalized)):
             scores = torch.tensor(
@@ -539,6 +550,7 @@ class SequenceGenerator(nn.Module):
             finalized[sent] = torch.jit.annotate(
                 List[Dict[str, Tensor]], finalized[sent]
             )
+
         return finalized
 
     def _prefix_tokens(

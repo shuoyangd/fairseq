@@ -344,7 +344,7 @@ class LexicallyConstrainedBeamSearch(Search):
         indices_buf = indices_buf.fmod(vocab_size)
 
         # Short circuit if there are no constraints in this batch
-        if not constraint_states:
+        if not constraint_states or step <= self.prefix_size:
             return scores_buf, indices_buf, beams_buf
 
         # STEP 1: get top-1 from each hypothesis across all sentences in the batch
@@ -418,6 +418,13 @@ class LexicallyConstrainedBeamSearch(Search):
             if step == 0:
                 break
 
+        # Manually prune invalid elements
+        # invalid = torch.arange(scores_buf.size(0)).to(lprobs).long()
+        # invalid = invalid[scores_buf != -math.inf]
+        # beams_buf = beams_buf.take(invalid)
+        # indices_buf = indices_buf.take(invalid)
+        # scores_buf = scores_buf.take(invalid)
+
         # STEP 3: Compute the "bank" for each candidate. This is the
         # number of constraints it's generated. We need this so that
         # we can do round-robin allocation of the beam across these
@@ -437,7 +444,7 @@ class LexicallyConstrainedBeamSearch(Search):
         banks = torch.tensor([state.bank for state in constraint_states], device=device)
 
         # STEP 4: Sort
-        num_constraint_tokens = len(state.tokens)
+        num_constraint_tokens = len(constraint_states[0].tokens)
 
         # Sort by keys (bank, score) (i.e., sort banks together, and scores
         # within banks). AFAIK pytorch doesn't support either stable sort or
