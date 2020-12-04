@@ -59,12 +59,23 @@ def make_batches(lines, args, task, max_positions, encode_fn):
         if args.prefix_size > 0:
             prefixes = torch.zeros((len(lines), args.prefix_size)).long()
 
+        sys_lines = []
+        ref_lines = []
         for i, line in enumerate(lines):
             fields = line.split("\t")
             assert (
-                args.prefix_size == 0 or len(fields) >= 2
-            ), "--prefix-size requires a second tab-delimited field"
+                (args.prefix_size == 0 and args.n_ensemble_views == 1) or len(fields) >= 2
+            ), "--prefix-size and --no-ensemble-views both require a second tab-delimited field " + \
+               "(ensemble views comes before target prefixes)"
 
+            # consume the multiview ensemble fields first,
+            # which comes before target prefixes
+            if args.n_ensemble_views > 1:
+                sys_lines.append(fields.pop(1))
+                if args.n_ensemble_views == 3:
+                    ref_lines.append(fields.pop(1))
+
+            # then it's target prefix
             if args.prefix_size > 0:
                 prefix = fields.pop(1)
                 assert (
@@ -111,19 +122,100 @@ def make_batches(lines, args, task, max_positions, encode_fn):
         max_positions=max_positions,
         ignore_invalid_inputs=args.skip_invalid_size_inputs_valid_test,
     ).next_epoch_itr(shuffle=False)
-    for batch in itr:
-        ids = batch["id"]
-        src_tokens = batch["net_input"]["src_tokens"]
-        src_lengths = batch["net_input"]["src_lengths"]
-        constraints = batch.get("constraints", None)
 
-        yield Batch(
-            ids=ids,
-            src_tokens=src_tokens,
-            src_lengths=src_lengths,
-            constraints=constraints,
-            prefixes=prefixes,
-        )
+    if args.n_ensemble_views > 1:
+        sys_tokens = [
+            task.source_dictionary.encode_line(
+                encode_fn(src_str), add_if_not_exist=False
+            ).long()
+            for src_str in sys_lines
+        ]
+        sys_lengths = [ t.numel() for t in sys_tokens ]
+        if args.n_ensemble_views == 3:
+            ref_tokens = [
+                task.source_dictionary.encode_line(
+                    encode_fn(src_str), add_if_not_exist=False
+                ).long()
+                for src_str in ref_lines
+            ]
+            ref_lengths = [ t.numel() for t in ref_tokens ]
+
+        sys_itr = task.get_batch_iterator(
+            dataset=task.build_dataset_for_inference(
+                sys_tokens, sys_lengths, constraints=constraints_tensor
+            ),
+            max_tokens=args.max_tokens,
+            max_sentences=args.batch_size,
+            max_positions=max_positions,
+            ignore_invalid_inputs=args.skip_invalid_size_inputs_valid_test,
+        ).next_epoch_itr(shuffle=False)
+        if args.n_ensemble_views == 3:
+            ref_itr = task.get_batch_iterator(
+                dataset=task.build_dataset_for_inference(
+                    ref_tokens, ref_lengths, constraints=constraints_tensor
+                ),
+                max_tokens=args.max_tokens,
+                max_sentences=args.batch_size,
+                max_positions=max_positions,
+                ignore_invalid_inputs=args.skip_invalid_size_inputs_valid_test,
+            ).next_epoch_itr(shuffle=False)
+
+    if args.n_ensemble_views == 2:
+        for src_batch, sys_batch in zip(itr, sys_itr):
+            ids = src_batch["id"]
+            src_tokens = src_batch["net_input"]["src_tokens"]
+            sys_tokens = sys_batch["net_input"]["src_tokens"]
+            src_lengths = src_batch["net_input"]["src_lengths"]
+            sys_lengths = sys_batch["net_input"]["src_lengths"]
+            constraints = src_batch.get("constraints", None)
+
+            yield Batch(
+                ids=ids,
+                src_tokens=src_tokens,
+                sys_tokens=sys_tokens,
+                src_lengths=src_lengths,
+                sys_lengths=sys_lengths,
+                constraints=constraints,
+                prefixes=prefixes,
+            )
+
+    elif args.n_ensemble_views == 3:
+        for src_batch, sys_batch, ref_batch in zip(itr, sys_itr, ref_itr):
+            ids = src_batch["id"]
+            src_tokens = src_batch["net_input"]["src_tokens"]
+            sys_tokens = sys_batch["net_input"]["src_tokens"]
+            ref_tokens = ref_batch["net_input"]["src_tokens"]
+            src_lengths = src_batch["net_input"]["src_lengths"]
+            sys_lengths = sys_batch["net_input"]["src_lengths"]
+            ref_lengths = ref_batch["net_input"]["src_lengths"]
+            constraints = src_batch.get("constraints", None)
+
+            yield Batch(
+                ids=ids,
+                src_tokens=src_tokens,
+                sys_tokens=sys_tokens,
+                ref_tokens=ref_tokens,
+                src_lengths=src_lengths,
+                sys_lengths=sys_lengths,
+                ref_lengths=ref_lengths,
+                constraints=constraints,
+                prefixes=prefixes,
+            )
+
+    else:
+        for batch in itr:
+            ids = batch["id"]
+            src_tokens = batch["net_input"]["src_tokens"]
+            src_lengths = batch["net_input"]["src_lengths"]
+            constraints = batch.get("constraints", None)
+
+            yield Batch(
+                ids=ids,
+                src_tokens=src_tokens,
+                src_lengths=src_lengths,
+                constraints=constraints,
+                prefixes=prefixes,
+            )
 
 
 def main(args):
