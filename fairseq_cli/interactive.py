@@ -33,7 +33,6 @@ logging.basicConfig(
 logger = logging.getLogger("fairseq_cli.interactive")
 
 
-Batch = namedtuple("Batch", "ids src_tokens src_lengths constraints prefixes")
 Translation = namedtuple("Translation", "src_str hypos pos_scores alignments")
 
 
@@ -169,6 +168,7 @@ def make_batches(lines, args, task, max_positions, encode_fn):
             sys_lengths = sys_batch["net_input"]["src_lengths"]
             constraints = src_batch.get("constraints", None)
 
+            Batch = namedtuple("Batch", "ids src_tokens sys_tokens src_lengths sys_lengths constraints prefixes")
             yield Batch(
                 ids=ids,
                 src_tokens=src_tokens,
@@ -190,6 +190,7 @@ def make_batches(lines, args, task, max_positions, encode_fn):
             ref_lengths = ref_batch["net_input"]["src_lengths"]
             constraints = src_batch.get("constraints", None)
 
+            Batch = namedtuple("Batch", "ids src_tokens sys_tokens ref_tokens src_lengths sys_lengths ref_lengths constraints prefixes")
             yield Batch(
                 ids=ids,
                 src_tokens=src_tokens,
@@ -209,6 +210,7 @@ def make_batches(lines, args, task, max_positions, encode_fn):
             src_lengths = batch["net_input"]["src_lengths"]
             constraints = batch.get("constraints", None)
 
+            Batch = namedtuple("Batch", "ids src_tokens src_lengths constraints prefixes")
             yield Batch(
                 ids=ids,
                 src_tokens=src_tokens,
@@ -319,7 +321,11 @@ def main(args):
         for batch in make_batches(inputs, args, task, max_positions, encode_fn):
             bsz = batch.src_tokens.size(0)
             src_tokens = batch.src_tokens
+            sys_tokens = batch.sys_tokens if hasattr(batch, "sys_tokens") else None
+            ref_tokens = batch.ref_tokens if hasattr(batch, "ref_tokens") else None
             src_lengths = batch.src_lengths
+            sys_lengths = batch.sys_lengths if hasattr(batch, "sys_lengths") else None
+            ref_lengths = batch.ref_lengths if hasattr(batch, "ref_lengths") else None
             constraints = batch.constraints
             prefixes = batch.prefixes
             if use_cuda:
@@ -329,6 +335,10 @@ def main(args):
                     constraints = constraints.cuda()
                 if prefixes is not None:
                     prefixes = prefixes.cuda()
+                sys_tokens = sys_tokens.cuda() if sys_tokens is not None else None
+                ref_tokens = ref_tokens.cuda() if ref_tokens is not None else None
+                sys_lengths = sys_lengths.cuda() if sys_lengths is not None else None
+                ref_lengths = ref_lengths.cuda() if ref_lengths is not None else None
 
             sample = {
                 "net_input": {
@@ -336,6 +346,12 @@ def main(args):
                     "src_lengths": src_lengths,
                 },
             }
+            if sys_tokens is not None and sys_lengths is not None:
+                sample["net_input"]["sys_tokens"] = sys_tokens
+                sample["net_input"]["sys_lengths"] = sys_lengths
+            if ref_tokens is not None and ref_lengths is not None:
+                sample["net_input"]["ref_tokens"] = ref_tokens
+                sample["net_input"]["ref_lengths"] = ref_lengths
             translate_start_time = time.time()
             translations = task.inference_step(
                 generator, models, sample, constraints=constraints, prefix_tokens=prefixes

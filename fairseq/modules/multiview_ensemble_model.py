@@ -6,7 +6,7 @@
 # Distributed under terms of the MIT license.
 
 import copy
-from ..sequence_generator import  EnsembleModel
+from ..sequence_generator import EnsembleModel
 from typing import Dict, List
 from torch import Tensor
 

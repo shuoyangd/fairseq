@@ -384,6 +384,7 @@ class FairseqTask(object):
             match_source_len=getattr(args, "match_source_len", False),
             no_repeat_ngram_size=getattr(args, "no_repeat_ngram_size", 0),
             search_strategy=search_strategy,
+            n_ensemble_views=getattr(args, "n_ensemble_views", 1),
             **extra_gen_cls_kwargs,
         )
 

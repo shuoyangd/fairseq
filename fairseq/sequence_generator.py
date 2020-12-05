@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import copy
 import math
 from typing import Dict, List, Optional
 
@@ -35,6 +36,7 @@ class SequenceGenerator(nn.Module):
         symbols_to_strip_from_output=None,
         lm_model=None,
         lm_weight=1.0,
+        n_ensemble_views=1,
     ):
         """Generates translations of a given source sentence.
 
@@ -61,6 +63,8 @@ class SequenceGenerator(nn.Module):
         super().__init__()
         if isinstance(models, EnsembleModel):
             self.model = models
+        elif n_ensemble_views > 1:
+            self.model = MultiviewEnsembleModel(models, n_ensemble_views)
         else:
             self.model = EnsembleModel(models)
         self.tgt_dict = tgt_dict
@@ -1018,3 +1022,137 @@ class EnsembleModelWithAlignment(EnsembleModel):
         if len(self.models) > 1:
             avg_attn.div_(len(self.models))
         return avg_attn
+
+
+class MultiviewEnsembleModel(EnsembleModel):
+    """
+    A mock-up wrapper of the original EnsembleModel class for multiview ensemble.
+    """
+
+    def __init__(self, model, n_ensemble_views=2):
+        """
+
+        :param model: a list with a single model checkpoint used for multi-view ensemble
+        :param n_ensemble_views: currently support 2 or 3. 2 -> src & sys; 3 -> src, sys, ref. See paper for details.
+        """
+        assert len(model) == 1  # don't support multiview ensemble on top of normal model ensemble yet
+        model = model[0]
+
+        self.n_ensemble_views = n_ensemble_views
+        models = [model] * n_ensemble_views  # this will be set to self in parent constructor
+        super().__init__(models)
+
+    def forward_encoder(self, net_input: Dict[str, Tensor]):
+        if not self.has_encoder():
+            return None
+
+        # in net_input, the token fields we expect are "src_tokens", "sys_tokens" and an optional "ref_tokens" field
+        # correspondingly, there will also be length fields "src_lengths", "sys_lengths", "ref_lengths"
+        # and there will be other fields that we don't care
+        # what we'll do is that we'll make new copies of net_input with only one of them each
+        # and pass them to the same model, so we get different ``views'' of the same model
+        if "source" in net_input:
+            raise NotImplementedError("not sure what format is this, " +
+                                      "but we assume the original source sentence is under \"src_tokens\" field")
+
+        # create copies of net_input and remove uncessary fields
+        # the model will only concern with the content in "src_tokens"
+        # so we also need to move the field to fool the model
+        net_input_src = net_input
+        net_input_sys = copy.deepcopy(net_input)
+        net_input_sys["src_tokens"] = net_input_sys["sys_tokens"]
+        net_input_sys["src_lengths"] = net_input_sys["sys_lengths"]
+        del net_input_sys["sys_tokens"]
+        del net_input_sys["sys_lengths"]
+        if self.n_ensemble_views == 3 and "ref_tokens" in net_input:
+            net_input_ref = copy.deepcopy(net_input)
+            net_input_ref["src_tokens"] = net_input_ref["ref_tokens"]
+            net_input_ref["src_lengths"] = net_input_ref["ref_lengths"]
+            del net_input_ref["sys_tokens"]
+            del net_input_ref["ref_tokens"]
+            del net_input_sys["ref_tokens"]
+            del net_input_src["ref_tokens"]
+            del net_input_ref["sys_lengths"]
+            del net_input_ref["ref_lengths"]
+            del net_input_sys["ref_lengths"]
+            del net_input_src["ref_lengths"]
+        elif self.n_ensemble_views == 3 and "ref_tokens" in net_input:
+            raise ValueError("If you want to do 3-ensemble, you need to pass reference in the input")
+        del net_input_src["sys_tokens"]
+        del net_input_src["sys_lengths"]
+
+        net_inputs = [net_input_src, net_input_sys]
+        if self.n_ensemble_views == 3 and "ref_tokens" in net_input:
+            net_inputs.append(net_input_ref)
+
+        return [model.encoder.forward_torchscript(net_input) for net_input, model in zip(net_inputs, self.models)]
+
+    def forward_decoder(
+        self,
+        tokens,
+        encoder_outs: List[EncoderOut],
+        incremental_states: List[Dict[str, Dict[str, Optional[Tensor]]]],
+        temperature: float = 1.0,
+    ):
+
+        log_probs = []
+        avg_attn: Optional[Tensor] = None
+        encoder_out: Optional[EncoderOut] = None
+        for i, model in enumerate(self.models):
+            if self.has_encoder():
+                encoder_out = encoder_outs[i]
+            # decode each model
+            if self.has_incremental_states():
+                decoder_out = model.decoder.forward(
+                    tokens,
+                    encoder_out=encoder_out,
+                    incremental_state=incremental_states[i],
+                )
+            else:
+                decoder_out = model.decoder.forward(tokens, encoder_out=encoder_out)
+
+            attn: Optional[Tensor] = None
+            decoder_len = len(decoder_out)
+            if decoder_len > 1 and decoder_out[1] is not None:
+                if isinstance(decoder_out[1], Tensor):
+                    attn = decoder_out[1]
+                else:
+                    attn_holder = decoder_out[1]["attn"]
+                    if isinstance(attn_holder, Tensor):
+                        attn = attn_holder
+                    elif attn_holder is not None:
+                        attn = attn_holder[0]
+                if attn is not None:
+                    attn = attn[:, -1, :]
+
+            decoder_out_tuple = (
+                decoder_out[0][:, -1:, :].div_(temperature),
+                None if decoder_len <= 1 else decoder_out[1],
+            )
+
+            probs = model.get_normalized_probs(
+                decoder_out_tuple, log_probs=True, sample=None
+            )
+            probs = probs[:, -1, :]
+            if self.models_size == 1:
+                return probs, attn
+
+            log_probs.append(probs)
+            if attn is not None:
+                if avg_attn is None:
+                    avg_attn = attn
+
+                # if we average we'll have a shape mismatch
+                # so we are just going to return the first one
+                # else:
+                #     avg_attn.add_(attn)
+
+        avg_probs = torch.logsumexp(torch.stack(log_probs, dim=0), dim=0) - math.log(
+            self.models_size
+        )
+
+        # if avg_attn is not None:
+        #     avg_attn.div_(self.models_size)
+
+        return avg_probs, avg_attn
+
