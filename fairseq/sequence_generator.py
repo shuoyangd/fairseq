@@ -37,6 +37,8 @@ class SequenceGenerator(nn.Module):
         lm_model=None,
         lm_weight=1.0,
         n_ensemble_views=1,
+        mcd_rate=0.0,
+        mcd_samples=5,
     ):
         """Generates translations of a given source sentence.
 
@@ -64,7 +66,7 @@ class SequenceGenerator(nn.Module):
         if isinstance(models, EnsembleModel):
             self.model = models
         elif n_ensemble_views > 1:
-            self.model = MultiviewEnsembleModel(models, n_ensemble_views)
+            self.model = MultiviewEnsembleModel(models, n_ensemble_views, mcd_rate, mcd_samples)
         else:
             self.model = EnsembleModel(models)
         self.tgt_dict = tgt_dict
@@ -1029,7 +1031,7 @@ class MultiviewEnsembleModel(EnsembleModel):
     A mock-up wrapper of the original EnsembleModel class for multiview ensemble.
     """
 
-    def __init__(self, model, n_ensemble_views=2):
+    def __init__(self, model, n_ensemble_views=2, mcd_rate=0.0, mcd_samples=5):
         """
 
         :param model: a list with a single model checkpoint used for multi-view ensemble
@@ -1038,8 +1040,22 @@ class MultiviewEnsembleModel(EnsembleModel):
         assert len(model) == 1  # don't support multiview ensemble on top of normal model ensemble yet
         model = model[0]
 
+        if mcd_rate != 0.0:
+            model.encoder.dropout_module.p = mcd_rate
+            model.encoder.dropout_module.apply_during_inference = True
+            model.decoder.dropout_module.p = mcd_rate
+            model.decoder.dropout_module.apply_during_inference = True
+            for idx in range(len(model.encoder.layers)):
+                model.encoder.layers[idx].dropout_module.p = mcd_rate
+                model.encoder.layers[idx].dropout_module.apply_during_inference = True
+            for idx in range(len(model.decoder.layers)):
+                model.decoder.layers[idx].dropout_module.p = mcd_rate
+                model.decoder.layers[idx].dropout_module.apply_during_inference = True
+
         self.n_ensemble_views = n_ensemble_views
-        models = [model] * n_ensemble_views  # this will be set to self in parent constructor
+        self.mcd_rate = mcd_rate
+        self.mcd_samples = mcd_samples
+        models = [model] * n_ensemble_views * mcd_samples if mcd_rate != 0.0 else [model] * n_ensemble_views  # this will be set to self in parent constructor
         super().__init__(models)
 
     def forward_encoder(self, net_input: Dict[str, Tensor]):
@@ -1084,6 +1100,8 @@ class MultiviewEnsembleModel(EnsembleModel):
         net_inputs = [net_input_src, net_input_sys]
         if self.n_ensemble_views == 3 and "ref_tokens" in net_input:
             net_inputs.append(net_input_ref)
+        if self.mcd_samples != 0.0:
+            net_inputs *= self.mcd_samples
 
         return [model.encoder.forward_torchscript(net_input) for net_input, model in zip(net_inputs, self.models)]
 

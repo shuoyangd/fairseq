@@ -362,6 +362,10 @@ def add_generation_args(parser):
                        help='initialize generation by target prefix of given length')
     group.add_argument('--n-ensemble-views', default=1, type=int, metavar='N',
                        help='number of views for multiview ape ensemble')
+    group.add_argument('--mcd-rate', default=0.0, type=float, metavar='p',
+                       help='Monte Carlo dropout rate -- at 0.0 it won\'t be used')
+    group.add_argument('--mcd-samples', default=5, type=int, metavar='N',
+                       help='Monte Carlo inference samples')
     group.add_argument('--no-repeat-ngram-size', default=0, type=int, metavar='N',
                        help='ngram blocking such that this size ngram cannot be repeated in the generation')
     group.add_argument('--sampling', action='store_true',

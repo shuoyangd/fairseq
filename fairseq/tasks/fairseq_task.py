@@ -385,6 +385,8 @@ class FairseqTask(object):
             no_repeat_ngram_size=getattr(args, "no_repeat_ngram_size", 0),
             search_strategy=search_strategy,
             n_ensemble_views=getattr(args, "n_ensemble_views", 1),
+            mcd_rate=getattr(args, "mcd_rate", 0.0),
+            mcd_samples=getattr(args, "mcd_samples", 0.0),
             **extra_gen_cls_kwargs,
         )
 
