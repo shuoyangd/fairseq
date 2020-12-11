@@ -1098,7 +1098,7 @@ class MultiviewEnsembleModel(EnsembleModel):
         del net_input_src["sys_lengths"]
 
         net_inputs = [net_input_src, net_input_sys]
-        if self.n_ensemble_views == 3 and "ref_tokens" in net_input:
+        if self.n_ensemble_views == 3:
             net_inputs.append(net_input_ref)
         if self.mcd_samples != 0.0:
             net_inputs *= self.mcd_samples
