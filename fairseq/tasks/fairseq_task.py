@@ -201,7 +201,7 @@ class FairseqTask(object):
     def build_generator(self, args):
         if getattr(args, 'score_reference', False):
             from fairseq.sequence_scorer import SequenceScorer
-            return SequenceScorer(self.target_dictionary)
+            return SequenceScorer(self.target_dictionary, decoder_states_dump_dir=getattr(args, 'decoder_states_dump_dir', None))
         else:
             from fairseq.sequence_generator import SequenceGenerator, SequenceGeneratorWithAlignment
             if getattr(args, 'print_alignment', False):

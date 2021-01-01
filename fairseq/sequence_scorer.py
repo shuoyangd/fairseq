@@ -3,19 +3,38 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import h5py
+import pdb
 import torch
 import sys
 
 from fairseq import utils
+from fairseq.criterions.label_smoothed_cross_entropy import HDF5_CHUNK_SIZE
 
+DECODER_EMBED_DIM = 512
 
 class SequenceScorer(object):
     """Scores the target for a given source sentence."""
 
-    def __init__(self, tgt_dict, softmax_batch=None):
+    def __init__(self, tgt_dict, softmax_batch=None, decoder_states_dump_dir=None):
         self.pad = tgt_dict.pad()
         self.eos = tgt_dict.eos()
         self.softmax_batch = softmax_batch or sys.maxsize
+        self.decoder_states_dump_dir = decoder_states_dump_dir
+        if self.decoder_states_dump_dir is not None:
+            self.decoder_states_dump_file = h5py.File(self.decoder_states_dump_dir, 'w')
+            self.dump_log_file = open(self.decoder_states_dump_dir + ".log", 'w')
+            self.decoder_states_dataset = \
+                self.decoder_states_dump_file.create_dataset("decoder_states",
+                                                             (0, DECODER_EMBED_DIM),
+                                                             maxshape=(None, None),
+                                                             dtype='f',
+                                                             chunks=(HDF5_CHUNK_SIZE, DECODER_EMBED_DIM))
+            self.decoder_states_count = 0
+        else:
+            self.decoder_states_dump_file = None
+        self.decoder_probs_dump_file = open(self.decoder_states_dump_dir + ".probs", 'w')
+        self.ok_bad_tags_dump_file = open(self.decoder_states_dump_dir + ".tags", 'w')
         assert self.softmax_batch > 0
 
     @torch.no_grad()
@@ -55,14 +74,38 @@ class SequenceScorer(object):
             model.eval()
             decoder_out = model.forward(**net_input)
             attn = decoder_out[1]
+
+            if self.decoder_states_dump_dir is not None:
+                x = decoder_out[0].detach().contiguous().view(-1, decoder_out[0].size(-1))
+                gold = sample['target']
+                pad_filter = (gold != self.pad).view(-1)
+                x = x[pad_filter, :]
+
+                remaining_dp_counts = x.size(0)
+                initial_chunk_size = min(remaining_dp_counts, HDF5_CHUNK_SIZE - (self.decoder_states_count - 1) % HDF5_CHUNK_SIZE - 1)
+                self.decoder_states_dataset[self.decoder_states_count:self.decoder_states_count+initial_chunk_size, :] = x[:initial_chunk_size, :].cpu()
+                self.decoder_states_count += initial_chunk_size
+                remaining_dp_counts -= initial_chunk_size
+                while remaining_dp_counts > 0:
+                    self.decoder_states_dataset.resize(self.decoder_states_dataset.shape[0] + HDF5_CHUNK_SIZE, axis=0)
+                    chunk_size = min(remaining_dp_counts, HDF5_CHUNK_SIZE)
+                    startpoint = x.size(0) - remaining_dp_counts
+                    self.decoder_states_dataset[self.decoder_states_count:self.decoder_states_count+chunk_size, :] =\
+                        x[startpoint:startpoint+chunk_size, :].cpu()
+                    self.decoder_states_count += chunk_size
+                    remaining_dp_counts -= chunk_size
+                self.dump_log_file.write("current batch has {0} states, writing into a database with capacity {1}. after writing, there are {2} states in database\n".format(x.size(0), self.decoder_states_dataset.shape[0], self.decoder_states_count))
+
             if type(attn) is dict:
                 attn = attn.get('attn', None)
 
             batched = batch_for_softmax(decoder_out, orig_target)
             probs, idx = None, 0
+            max_probs = None
             for bd, tgt, is_single in batched:
                 sample['target'] = tgt
                 curr_prob = model.get_normalized_probs(bd, log_probs=len(models) == 1, sample=sample).data
+                _, argmax = torch.max(curr_prob, dim=-1)
                 if is_single:
                     probs = gather_target_probs(curr_prob, orig_target)
                 else:
@@ -76,6 +119,20 @@ class SequenceScorer(object):
                 sample['target'] = orig_target
 
             probs = probs.view(sample['target'].shape)
+            if self.decoder_states_dump_dir is not None:
+                filtered_probs = probs.view(-1)
+                filtered_probs = filtered_probs[pad_filter]
+                for elem in filtered_probs:
+                    self.decoder_probs_dump_file.write(str(elem.item()) + "\n")
+
+            argmax = argmax.view(sample['target'].shape)
+            ok_bad_tags = (argmax == sample['target'])
+            if self.decoder_states_dump_file is not None:
+                ok_bad_tags = ok_bad_tags.view(-1)
+                ok_bad_tags = ok_bad_tags[pad_filter]
+                for elem in ok_bad_tags:
+                    tag = "OK" if elem.item() == True else "BAD"
+                    self.ok_bad_tags_dump_file.write(tag + "\n")
 
             if avg_probs is None:
                 avg_probs = probs
@@ -87,6 +144,7 @@ class SequenceScorer(object):
                     avg_attn = attn
                 else:
                     avg_attn.add_(attn)
+
         if len(models) > 1:
             avg_probs.div_(len(models))
             avg_probs.log_()
