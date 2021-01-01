@@ -55,6 +55,16 @@ class BaseFairseqModel(nn.Module):
         """Get normalized probabilities (or log probs) from a net's output."""
         return self.get_normalized_probs_scriptable(net_output, log_probs, sample)
 
+    def get_rejection_probs(self, net_output, log_probs):
+        if hasattr(self, 'decoder'):
+            return self.decoder.get_rejection_probs(net_output, log_probs)
+        raise NotImplementedError
+
+    def get_auxiliary_probs(self, net_output, log_probs):
+        if hasattr(self, 'decoder'):
+            return self.decoder.get_auxiliary_probs(net_output, log_probs)
+        raise NotImplementedError
+
     # TorchScript doesn't support super() method so that the scriptable Subclass
     # can't access the base class model in Torchscript.
     # Current workaround is to add a helper function with different name and

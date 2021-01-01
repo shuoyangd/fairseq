@@ -172,6 +172,10 @@ class TransformerModel(FairseqEncoderDecoderModel):
                             help='block size of quantization noise at training time')
         parser.add_argument('--quant-noise-scalar', type=float, metavar='D', default=0,
                             help='scalar quantization noise and scalar quantization at training time')
+        parser.add_argument('--rejection-option', action='store_true', default=False,
+                            help='use rejection option during training')
+        parser.add_argument("--rejection-option-auxiliary-head", action='store_true', default=False,
+                            help='use rejection auxiliary head as described in Geifman et al. 2019')
         # fmt: on
 
     @classmethod
@@ -622,6 +626,17 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             else None
         )
 
+        if args.rejection_option:
+            self.rejection_head = Linear(embed_dim, 1)
+            if args.rejection_option_auxiliary_head:
+                self.auxiliary_head = nn.Parameter(torch.Tensor(len(dictionary), self.output_embed_dim))
+                nn.init.normal_(self.auxiliary_head, mean=0, std=self.output_embed_dim ** -0.5)
+            else:
+                self.auxiliary_head = None
+        else:
+            self.rejection_head = None
+            self.auxiliary_head = None
+
         self.adaptive_softmax = None
         self.output_projection = None
         if args.adaptive_softmax_cutoff is not None:
@@ -690,8 +705,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             alignment_layer=alignment_layer,
             alignment_heads=alignment_heads,
         )
-        if not features_only:
-            x = self.output_layer(x)
+        # if not features_only:
+        #     x = self.output_layer(x)
         return x, extra
 
     def extract_features(
@@ -833,6 +848,16 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         if self.adaptive_softmax is None:
             # project back to size of vocabulary
             return self.output_projection(features)
+        else:
+            return features
+
+    def rejection_layer(self, features, **kwargs):
+        return nn.functional.linear(features, self.rejection_head.weight)
+
+    def auxiliary_layer(self, features, **kwargs):
+        """Project features to the vocabulary size."""
+        if self.adaptive_softmax is None:
+            return nn.functional.linear(features, self.auxiliary_head)
         else:
             return features
 

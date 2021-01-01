@@ -255,6 +255,7 @@ class SequenceGenerator(nn.Module):
         )  # +2 for eos and pad
         tokens[:, 0] = self.eos if bos_token is None else bos_token
         attn: Optional[Tensor] = None
+        rej_probs = None
 
         # A list that indicates candidates that should be ignored.
         # For example, suppose we're sampling and have already finalized 2/5
@@ -309,7 +310,7 @@ class SequenceGenerator(nn.Module):
                     encoder_outs, reorder_state
                 )
 
-            lprobs, avg_attn_scores = self.model.forward_decoder(
+            lprobs, avg_attn_scores, avg_rej_probs = self.model.forward_decoder(
                 tokens[:, : step + 1],
                 encoder_outs,
                 incremental_states,
@@ -354,6 +355,11 @@ class SequenceGenerator(nn.Module):
                         bsz * beam_size, avg_attn_scores.size(1), max_len + 2
                     ).to(scores)
                 attn[:, :, step + 1].copy_(avg_attn_scores)
+
+            if avg_rej_probs is not None:
+                if rej_probs is None:
+                    rej_probs = scores.new(bsz * beam_size, max_len + 2)
+                rej_probs[:, step + 1].copy_(avg_rej_probs.squeeze(2).squeeze(1))
 
             scores = scores.type_as(lprobs)
             eos_bbsz_idx = torch.empty(0).to(
@@ -407,6 +413,7 @@ class SequenceGenerator(nn.Module):
                     eos_scores,
                     tokens,
                     scores,
+                    rej_probs,
                     finalized,
                     finished,
                     beam_size,
@@ -459,6 +466,8 @@ class SequenceGenerator(nn.Module):
                     attn = attn.view(bsz, -1)[batch_idxs].view(
                         new_bsz * beam_size, attn.size(1), -1
                     )
+                if rej_probs is not None:
+                    rej_probs = rej_probs.view(bsz, -1)[batch_idxs].view(new_bsz * beam_size, -1)
                 bsz = new_bsz
             else:
                 batch_idxs = None
@@ -582,6 +591,7 @@ class SequenceGenerator(nn.Module):
         eos_scores,
         tokens,
         scores,
+        rej_probs,
         finalized: List[List[Dict[str, Tensor]]],
         finished: List[bool],
         beam_size: int,
@@ -612,6 +622,7 @@ class SequenceGenerator(nn.Module):
             if attn is not None
             else None
         )
+        rej_probs_clone = rej_probs.index_select(0, bbsz_idx)[:, 1:step+2] if rej_probs is not None else None
 
         # compute scores per token position
         pos_scores = scores.index_select(0, bbsz_idx)[:, : step + 1]
@@ -679,6 +690,8 @@ class SequenceGenerator(nn.Module):
                         "positional_scores": pos_scores[i],
                     }
                 )
+                if rej_probs_clone is not None:
+                    finalized[sent][-1]["rej_probs"] = rej_probs_clone[i]
 
         newly_finished: List[int] = []
 
@@ -814,6 +827,7 @@ class EnsembleModel(nn.Module):
         temperature: float = 1.0,
     ):
         log_probs = []
+        rej_probs = []
         avg_attn: Optional[Tensor] = None
         encoder_out: Optional[EncoderOut] = None
         for i, model in enumerate(self.models):
@@ -851,11 +865,18 @@ class EnsembleModel(nn.Module):
             probs = model.get_normalized_probs(
                 decoder_out_tuple, log_probs=True, sample=None
             )
+            if hasattr(model, "rejection_head") and model.rejection_head is not None:
+                rprobs = model.get_rejection_probs(
+                    decoder_out_tuple, log_probs=True
+                )
+            else:
+                rprobs = None
             probs = probs[:, -1, :]
             if self.models_size == 1:
-                return probs, attn
+                return probs, attn, rprobs
 
             log_probs.append(probs)
+            rej_probs.append(rprobs)
             if attn is not None:
                 if avg_attn is None:
                     avg_attn = attn
@@ -865,10 +886,16 @@ class EnsembleModel(nn.Module):
         avg_probs = torch.logsumexp(torch.stack(log_probs, dim=0), dim=0) - math.log(
             self.models_size
         )
+        if rej_probs != []:
+            avg_rej_probs = torch.logsumexp(torch.stack(rej_probs, dim=0), dim=0) - math.log(
+                len(self.models)
+            )
+        else:
+            avg_rej_probs = None
 
         if avg_attn is not None:
             avg_attn.div_(self.models_size)
-        return avg_probs, avg_attn
+        return avg_probs, avg_attn, avg_rej_probs
 
     @torch.jit.export
     def reorder_encoder_out(self, encoder_outs: Optional[List[EncoderOut]], new_order):

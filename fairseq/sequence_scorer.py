@@ -62,6 +62,7 @@ class SequenceScorer(object):
 
         # compute scores for each model in the ensemble
         avg_probs = None
+        avg_rej_probs = None
         avg_attn = None
         for model in models:
             model.eval()
@@ -71,23 +72,29 @@ class SequenceScorer(object):
                 attn = attn.get("attn", None)
 
             batched = batch_for_softmax(decoder_out, orig_target)
-            probs, idx = None, 0
+            probs, rej_probs, idx = None, None, 0
             for bd, tgt, is_single in batched:
                 sample["target"] = tgt
                 curr_prob = model.get_normalized_probs(
                     bd, log_probs=len(models) == 1, sample=sample
                 ).data
+                curr_rej_prob = model.get_rejection_probs(
+                    bd, log_probs=(len(models) == 1)
+                ).data
                 if is_single:
                     probs = gather_target_probs(curr_prob, orig_target)
+                    rej_probs = curr_rej_prob
                 else:
                     if probs is None:
                         probs = curr_prob.new(orig_target.numel())
+                        rej_probs = curr_rej_prob.new(orig_target.numel())
                     step = curr_prob.size(0) * curr_prob.size(1)
                     end = step + idx
                     tgt_probs = gather_target_probs(
                         curr_prob.view(tgt.shape + (curr_prob.size(-1),)), tgt
                     )
                     probs[idx:end] = tgt_probs.view(-1)
+                    rej_probs[idx:end] = curr_rej_prob.view(-1)
                     idx = end
                 sample["target"] = orig_target
 
@@ -95,8 +102,10 @@ class SequenceScorer(object):
 
             if avg_probs is None:
                 avg_probs = probs
+                avg_rej_probs = rej_probs
             else:
                 avg_probs.add_(probs)
+                avg_rej_probs.add_(rej_probs)
             if attn is not None:
                 if torch.is_tensor(attn):
                     attn = attn.data
@@ -108,7 +117,9 @@ class SequenceScorer(object):
                     avg_attn.add_(attn)
         if len(models) > 1:
             avg_probs.div_(len(models))
+            avg_rej_probs.div_(len(models))
             avg_probs.log_()
+            avg_rej_probs.log_()
             if avg_attn is not None:
                 avg_attn.div_(len(models))
 
@@ -124,6 +135,7 @@ class SequenceScorer(object):
             )
             tgt_len = ref.numel()
             avg_probs_i = avg_probs[i][start_idxs[i] : start_idxs[i] + tgt_len]
+            avg_rej_probs_i = avg_rej_probs[i][start_idxs[i]:start_idxs[i] + tgt_len]
             score_i = avg_probs_i.sum() / tgt_len
             if avg_attn is not None:
                 avg_attn_i = avg_attn[i]
@@ -147,6 +159,7 @@ class SequenceScorer(object):
                         "attention": avg_attn_i,
                         "alignment": alignment,
                         "positional_scores": avg_probs_i,
+                        "rej_probs": avg_rej_probs_i,
                     }
                 ]
             )

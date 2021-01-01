@@ -484,6 +484,7 @@ class Trainer(object):
                         optimizer=self.optimizer,
                         update_num=self.get_num_updates(),
                         ignore_grad=is_dummy_batch,
+                        update_no=self.get_num_updates(),  # pass number of updates to criterion
                     )
                     del loss
 
@@ -606,6 +607,7 @@ class Trainer(object):
                     self.optimizer,
                     self.get_num_updates(),
                     ignore_grad=False,
+                    update_no=self.get_num_updates(),  # pass number of updates to criterion
                 )
             raise
         except OverflowError as e:

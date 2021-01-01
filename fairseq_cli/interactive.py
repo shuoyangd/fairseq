@@ -285,6 +285,16 @@ def main(args):
                         ),
                     )
                 )
+                if "rej_probs" in hypo:
+                    print('R-{}\t{}'.format(
+                        id,
+                        ' '.join(
+                            map(
+                                lambda x: '{:.4f}'.format(x),
+                                hypo['rej_probs'].tolist()
+                            )
+                        )
+                    ))
                 if args.print_alignment:
                     alignment_str = " ".join(
                         ["{}-{}".format(src, tgt) for src, tgt in alignment]

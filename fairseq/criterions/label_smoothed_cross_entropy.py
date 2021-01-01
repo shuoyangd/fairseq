@@ -58,7 +58,7 @@ class LabelSmoothedCrossEntropyCriterion(FairseqCriterion):
                             help='Ignore first N tokens')
         # fmt: on
 
-    def forward(self, model, sample, reduce=True):
+    def forward(self, model, sample, reduce=True, update_no=0):
         """Compute the loss for the given sample.
 
         Returns a tuple with three elements:

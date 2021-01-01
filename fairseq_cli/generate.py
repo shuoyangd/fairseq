@@ -285,6 +285,14 @@ def _main(args, output_file):
                         ),
                         file=output_file,
                     )
+                    print('R-{}\t{}'.format(
+                        sample_id,
+                            ' '.join(map(
+                                lambda x: '{:.4f}'.format(x),
+                                hypo['rej_probs'].tolist()
+                            )
+                        )
+                    ))
 
                     if args.print_alignment:
                         print(
