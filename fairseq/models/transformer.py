@@ -690,8 +690,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             alignment_layer=alignment_layer,
             alignment_heads=alignment_heads,
         )
-        if not features_only:
-            x = self.output_layer(x)
+        # if not features_only:
+        #     x = self.output_layer(x)
         return x, extra
 
     def extract_features(

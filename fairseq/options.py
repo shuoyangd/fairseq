@@ -408,6 +408,13 @@ def add_generation_args(parser):
 
     # special decoding format for advanced decoding.
     group.add_argument('--decoding-format', default=None, type=str, choices=['unigram', 'ensemble', 'vote', 'dp', 'bs'])
+
+    # states dump
+    group.add_argument('--decoder-states-dump-dir', type=str, default=None, metavar='PATH',
+                       help='directory to dump decoder states for analysis')
+    group.add_argument('--dump-ok-bad-label', action='store_true', default=False,
+                       help='aside from dumping deocder states, also dump ok/bad label of target words (default=False)')
+
     # fmt: on
     return group
 

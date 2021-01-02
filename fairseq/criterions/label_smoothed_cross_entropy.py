@@ -9,6 +9,7 @@ import torch
 from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
 
+HDF5_CHUNK_SIZE = 1024
 
 def label_smoothed_nll_loss(lprobs, target, epsilon, ignore_index=None, reduce=True):
     if target.dim() == lprobs.dim() - 1:

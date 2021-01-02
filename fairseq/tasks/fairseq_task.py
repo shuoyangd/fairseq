@@ -297,6 +297,7 @@ class FairseqTask(object):
             return SequenceScorer(
                 self.target_dictionary,
                 compute_alignment=getattr(args, "print_alignment", False),
+                decoder_states_dump_dir=getattr(args, 'decoder_states_dump_dir', None),
             )
 
         from fairseq.sequence_generator import (
