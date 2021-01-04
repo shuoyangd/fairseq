@@ -11,7 +11,7 @@ import torch
 from fairseq import utils
 from fairseq.criterions.label_smoothed_cross_entropy import HDF5_CHUNK_SIZE
 
-DECODER_EMBED_DIM = 512
+DECODER_EMBED_DIM = 1024
 
 class SequenceScorer(object):
     """Scores the target for a given source sentence."""
@@ -116,36 +116,43 @@ class SequenceScorer(object):
             batched = batch_for_softmax(decoder_out, orig_target)
             probs, idx = None, 0
             max_probs = None
+            argmaxs = None
             for bd, tgt, is_single in batched:
                 sample["target"] = tgt
                 curr_prob = model.get_normalized_probs(
                     bd, log_probs=len(models) == 1, sample=sample
                 ).data
-                _, argmax = torch.max(curr_prob, dim=-1)
+                max_prob, argmax = torch.max(curr_prob, dim=-1)
                 if is_single:
                     probs = gather_target_probs(curr_prob, orig_target)
+                    max_probs = max_prob
+                    argmaxs = argmax
                 else:
                     if probs is None:
                         probs = curr_prob.new(orig_target.numel())
+                        max_probs = max_prob.new(orig_target.numel())
+                        argmaxs = argmax.new(orig_target.numel())
                     step = curr_prob.size(0) * curr_prob.size(1)
                     end = step + idx
                     tgt_probs = gather_target_probs(
                         curr_prob.view(tgt.shape + (curr_prob.size(-1),)), tgt
                     )
                     probs[idx:end] = tgt_probs.view(-1)
+                    max_probs[idx:end] = max_prob.view(-1)
+                    argmaxs[idx:end] = argmax.view(-1)
                     idx = end
                 sample["target"] = orig_target
 
             probs = probs.view(sample["target"].shape)
 
             if self.decoder_states_dump_dir is not None:
-                filtered_probs = probs.view(-1)
+                filtered_probs = max_probs.view(-1)
                 filtered_probs = filtered_probs[pad_filter]
                 for elem in filtered_probs:
                     self.decoder_probs_dump_file.write(str(elem.item()) + "\n")
 
-            argmax = argmax.view(sample['target'].shape)
-            ok_bad_tags = (argmax == sample['target'])
+            argmaxs = argmaxs.view(sample['target'].shape)
+            ok_bad_tags = (argmaxs == sample['target'])
             if self.decoder_states_dump_file is not None:
                 ok_bad_tags = ok_bad_tags.view(-1)
                 ok_bad_tags = ok_bad_tags[pad_filter]
