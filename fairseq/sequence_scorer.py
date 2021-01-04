@@ -47,10 +47,10 @@ class SequenceScorer(object):
                                                              dtype='f',
                                                              chunks=(HDF5_CHUNK_SIZE, DECODER_EMBED_DIM))
             self.decoder_states_count = 0
+            self.decoder_probs_dump_file = open(self.decoder_states_dump_dir + ".probs", 'w')
+            self.ok_bad_tags_dump_file = open(self.decoder_states_dump_dir + ".tags", 'w')
         else:
             self.decoder_states_dump_file = None
-        self.decoder_probs_dump_file = open(self.decoder_states_dump_dir + ".probs", 'w')
-        self.ok_bad_tags_dump_file = open(self.decoder_states_dump_dir + ".tags", 'w')
 
     @torch.no_grad()
     def generate(self, models, sample, **kwargs):
