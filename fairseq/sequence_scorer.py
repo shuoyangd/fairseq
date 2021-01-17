@@ -53,7 +53,7 @@ class SequenceScorer(object):
             self.decoder_states_dump_file = None
 
     @torch.no_grad()
-    def generate(self, models, sample, **kwargs):
+    def generate(self, models, sample, return_states=False, **kwargs):
         """Score a batch of translations."""
         net_input = sample["net_input"]
 
@@ -91,11 +91,11 @@ class SequenceScorer(object):
             if type(attn) is dict:
                 attn = attn.get("attn", None)
 
+            x = decoder_out[0].detach().contiguous().view(-1, decoder_out[0].size(-1))
             if self.decoder_states_dump_dir is not None:
-                x = decoder_out[0].detach().contiguous().view(-1, decoder_out[0].size(-1))
                 gold = sample['target']
-                pad_filter = (gold != self.pad).view(-1)
-                x = x[pad_filter, :]
+                pad_filter = (gold != self.pad)
+                x = x[pad_filter.view(-1), :]
 
                 remaining_dp_counts = x.size(0)
                 initial_chunk_size = min(remaining_dp_counts, HDF5_CHUNK_SIZE - (self.decoder_states_count - 1) % HDF5_CHUNK_SIZE - 1)
@@ -116,39 +116,54 @@ class SequenceScorer(object):
             batched = batch_for_softmax(decoder_out, orig_target)
             probs, idx = None, 0
             max_probs = None
+            argmaxs = None
             for bd, tgt, is_single in batched:
                 sample["target"] = tgt
                 curr_prob = model.get_normalized_probs(
                     bd, log_probs=len(models) == 1, sample=sample
                 ).data
-                _, argmax = torch.max(curr_prob, dim=-1)
+                max_prob, argmax = torch.max(curr_prob, dim=-1)
                 if is_single:
                     probs = gather_target_probs(curr_prob, orig_target)
+                    max_probs = max_prob
+                    argmaxs = argmax
                 else:
                     if probs is None:
                         probs = curr_prob.new(orig_target.numel())
+                        max_probs = max_prob.new(orig_target.numel())
+                        argmaxs = argmax.new(orig_target.numel())
                     step = curr_prob.size(0) * curr_prob.size(1)
                     end = step + idx
                     tgt_probs = gather_target_probs(
                         curr_prob.view(tgt.shape + (curr_prob.size(-1),)), tgt
                     )
                     probs[idx:end] = tgt_probs.view(-1)
+                    max_probs[idx:end] = max_prob.view(-1)
+                    argmaxs[idx:end] = argmax.view(-1)
                     idx = end
                 sample["target"] = orig_target
 
             probs = probs.view(sample["target"].shape)
+            states_shape = list(sample["target"].shape)
+            states_shape.append(-1)
+            states = decoder_out[0].detach().contiguous().view(states_shape)
 
+            bsz = probs.size(0)
             if self.decoder_states_dump_dir is not None:
-                filtered_probs = probs.view(-1)
-                filtered_probs = filtered_probs[pad_filter]
-                for elem in filtered_probs:
-                    self.decoder_probs_dump_file.write(str(elem.item()) + "\n")
+                for item_idx in range(bsz):
+                    pad_filter_item = pad_filter[item_idx]
+                    max_probs_item = max_probs[item_idx]
+                    filtered_probs_item = max_probs_item[pad_filter_item].view(-1)
+                    self.decoder_probs_dump_file.write(str(filtered_probs_item[0].item()))
+                    for elem in filtered_probs_item[1:]:
+                        self.decoder_probs_dump_file.write(" " + str(elem.item()))
+                    self.decoder_probs_dump_file.write("\n")
 
-            argmax = argmax.view(sample['target'].shape)
-            ok_bad_tags = (argmax == sample['target'])
+            argmaxs = argmaxs.view(sample['target'].shape)
+            ok_bad_tags = (argmaxs == sample['target'])
             if self.decoder_states_dump_file is not None:
                 ok_bad_tags = ok_bad_tags.view(-1)
-                ok_bad_tags = ok_bad_tags[pad_filter]
+                ok_bad_tags = ok_bad_tags[pad_filter.view(-1)]
                 for elem in ok_bad_tags:
                     tag = "OK" if elem.item() == True else "BAD"
                     self.ok_bad_tags_dump_file.write(tag + "\n")
@@ -172,7 +187,6 @@ class SequenceScorer(object):
             if avg_attn is not None:
                 avg_attn.div_(len(models))
 
-        bsz = avg_probs.size(0)
         hypos = []
         start_idxs = sample["start_indices"] if "start_indices" in sample else [0] * bsz
         for i in range(bsz):
@@ -185,6 +199,7 @@ class SequenceScorer(object):
             tgt_len = ref.numel()
             avg_probs_i = avg_probs[i][start_idxs[i] : start_idxs[i] + tgt_len]
             score_i = avg_probs_i.sum() / tgt_len
+            states_i = states[i][start_idxs[i] : start_idxs[i] + tgt_len, :]
             if avg_attn is not None:
                 avg_attn_i = avg_attn[i]
                 if self.compute_alignment:
@@ -199,15 +214,29 @@ class SequenceScorer(object):
                     alignment = None
             else:
                 avg_attn_i = alignment = None
-            hypos.append(
-                [
-                    {
-                        "tokens": ref,
-                        "score": score_i,
-                        "attention": avg_attn_i,
-                        "alignment": alignment,
-                        "positional_scores": avg_probs_i,
-                    }
-                ]
-            )
+            if return_states:
+                hypos.append(
+                    [
+                        {
+                            "tokens": ref,
+                            "score": score_i,
+                            "attention": avg_attn_i,
+                            "alignment": alignment,
+                            "positional_scores": avg_probs_i,
+                            "states": states_i,
+                        }
+                    ]
+                )
+            else:
+                hypos.append(
+                    [
+                        {
+                            "tokens": ref,
+                            "score": score_i,
+                            "attention": avg_attn_i,
+                            "alignment": alignment,
+                            "positional_scores": avg_probs_i,
+                        }
+                    ]
+                )
         return hypos
