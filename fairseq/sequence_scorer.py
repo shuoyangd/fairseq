@@ -52,7 +52,7 @@ class SequenceScorer(object):
         else:
             self.decoder_states_dump_file = None
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def generate(self, models, sample, return_states=False, **kwargs):
         """Score a batch of translations."""
         net_input = sample["net_input"]
@@ -85,7 +85,7 @@ class SequenceScorer(object):
         avg_probs = None
         avg_attn = None
         for model in models:
-            model.eval()
+            model.eval()  # TODO? this disables dropout
             decoder_out = model(**net_input)
             attn = decoder_out[1] if len(decoder_out) > 1 else None
             if type(attn) is dict:
@@ -146,7 +146,7 @@ class SequenceScorer(object):
             probs = probs.view(sample["target"].shape)
             states_shape = list(sample["target"].shape)
             states_shape.append(-1)
-            states = decoder_out[0].detach().contiguous().view(states_shape)
+            states = decoder_out[0].contiguous().view(states_shape)
 
             bsz = probs.size(0)
             if self.decoder_states_dump_dir is not None:
